@@ -24,6 +24,7 @@ final class Statement implements SqliteStatement
         private readonly Connection $connection,
         private readonly int $statementId,
         private readonly string $query,
+        private readonly bool $transactional,
     ) {
         $this->onClose = new DeferredFuture();
         $this->lastUsedAt = \time();
@@ -40,7 +41,7 @@ final class Statement implements SqliteStatement
             throw new \Error('The SQLite statement is closed');
         }
 
-        $result = $this->connection->executeStatement($this->statementId, $this->query, $params);
+        $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $this->transactional);
         $this->lastUsedAt = \time();
         if (!$result->isClosed()) {
             $this->activeResult = $result;
@@ -70,7 +71,7 @@ final class Statement implements SqliteStatement
 
         $this->closed = true;
         $this->activeResult?->close();
-        $this->connection->closeStatement($this->statementId, $this->query);
+        $this->connection->closeStatement($this->statementId, $this->query, $this->transactional);
         $this->onClose->complete();
     }
 

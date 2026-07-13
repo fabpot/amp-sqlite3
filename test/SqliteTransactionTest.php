@@ -10,6 +10,7 @@ use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
 use Revolt\EventLoop;
+use function Amp\async;
 
 final class SqliteTransactionTest extends TestCase
 {
@@ -18,7 +19,7 @@ final class SqliteTransactionTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->connection = (new SqliteConnector())->connect(new SqliteConfig(':memory:'));
+        $this->connection = (new SqliteConnector())->connect((new SqliteConfig(':memory:'))->withBatchSize(1));
         $this->connection->query('CREATE TABLE entries (value TEXT)');
     }
 
@@ -76,6 +77,34 @@ final class SqliteTransactionTest extends TestCase
             [['value' => 'outer'], ['value' => 'nested commit']],
             \iterator_to_array($this->connection->query('SELECT value FROM entries')),
         );
+    }
+
+    public function testParentWaitsForNestedTransaction(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $nested = $transaction->beginTransaction();
+        $future = async(fn () => $transaction->execute('INSERT INTO entries VALUES (?)', ['after nested']));
+
+        self::assertFalse($future->isComplete());
+        $nested->commit();
+        $future->await();
+        $transaction->commit();
+
+        self::assertSame([['value' => 'after nested']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testTransactionWaitsForActiveResult(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $result = $transaction->query("SELECT 'first' AS value UNION ALL SELECT 'second'");
+        $future = async(fn () => $transaction->execute('INSERT INTO entries VALUES (?)', ['after result']));
+
+        self::assertFalse($future->isComplete());
+        $result->close();
+        $future->await();
+        $transaction->commit();
+
+        self::assertSame([['value' => 'after result']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
     public function testCallbacksRunOnce(): void

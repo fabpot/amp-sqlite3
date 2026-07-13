@@ -24,6 +24,7 @@ final class Transaction implements SqliteTransaction
     private bool $active = true;
     private int $nextSavepointId = 1;
     private ?Transaction $activeNested = null;
+    private ?DeferredFuture $nestedBusy = null;
 
     public function __construct(
         private readonly Connection $connection,
@@ -45,21 +46,21 @@ final class Transaction implements SqliteTransaction
     {
         $this->assertActive();
 
-        return $this->connection->query($sql);
+        return $this->connection->queryInTransaction($sql);
     }
 
     public function prepare(string $sql): SqliteStatement
     {
         $this->assertActive();
 
-        return $this->connection->prepare($sql);
+        return $this->connection->prepareInTransaction($sql);
     }
 
     public function execute(string $sql, array $params = []): SqliteResult
     {
         $this->assertActive();
 
-        return $this->connection->execute($sql, $params);
+        return $this->connection->executeInTransaction($sql, $params);
     }
 
     public function beginTransaction(): SqliteTransaction
@@ -71,6 +72,7 @@ final class Transaction implements SqliteTransaction
 
         $savepoint = 'amp_sqlite_' . $this->nextSavepointId++;
         $this->connection->executeControl("SAVEPOINT {$savepoint}");
+        $this->nestedBusy = new DeferredFuture();
         $transaction = new self($this->connection, $this->mode, $this, $savepoint);
         $this->activeNested = $transaction;
 
@@ -169,11 +171,17 @@ final class Transaction implements SqliteTransaction
     {
         if ($this->activeNested === $transaction) {
             $this->activeNested = null;
+            $this->nestedBusy?->complete();
+            $this->nestedBusy = null;
         }
     }
 
     private function assertActive(): void
     {
+        while ($this->nestedBusy !== null) {
+            $this->nestedBusy->getFuture()->await();
+        }
+
         if (!$this->isActive()) {
             throw new SqliteTransactionError('The transaction has been committed or rolled back');
         }

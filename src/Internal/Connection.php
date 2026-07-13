@@ -10,6 +10,8 @@ use Amp\ForbidSerialization;
 use Amp\Parallel\Context\Context;
 use Amp\Sql\SqlTransactionIsolation;
 use Amp\Sync\LocalMutex;
+use Amp\Sync\Lock;
+use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
@@ -17,6 +19,7 @@ use Fabpot\Amp\Sqlite\SqliteQueryError;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
+use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 
 final class Connection implements SqliteConnection
@@ -28,10 +31,13 @@ final class Connection implements SqliteConnection
     private readonly DeferredFuture $onClose;
     private SqliteTransactionMode $transactionMode;
     private bool $closed = false;
+    private bool $operationActive = false;
+    private int $activeLeases = 0;
     private int $lastUsedAt;
     private int $nextRequestId = 1;
     private ?Transaction $activeTransaction = null;
-    private ?\Amp\Sync\Lock $transactionLock = null;
+    private ?Lock $transactionLock = null;
+    private ?DeferredFuture $transactionBusy = null;
 
     public function __construct(
         private readonly SqliteConfig $config,
@@ -50,35 +56,23 @@ final class Connection implements SqliteConnection
 
     public function query(string $sql): SqliteResult
     {
-        return $this->run($sql, [], false);
+        return $this->run($sql, [], false, false);
     }
 
     public function prepare(string $sql): SqliteStatement
     {
-        self::validateParameters($sql, [], true, false);
-        $lock = $this->transactionLock ?? $this->mutex->acquire();
-        $releaseLock = $this->transactionLock === null;
-
-        try {
-            $value = $this->request('prepare', $sql, ['sql' => $sql]);
-        } finally {
-            if ($releaseLock) {
-                $lock->release();
-            }
-        }
-
-        return new Statement($this, $value['statementId'], $sql);
+        return $this->prepareStatement($sql, false);
     }
 
     public function execute(string $sql, array $params = []): SqliteResult
     {
-        return $this->run($sql, $params);
+        return $this->run($sql, $params, true, false);
     }
 
     public function beginTransaction(): SqliteTransaction
     {
         if ($this->activeTransaction !== null) {
-            throw new \Fabpot\Amp\Sqlite\SqliteTransactionError('A transaction is already active');
+            throw new SqliteTransactionError('A transaction is already active');
         }
 
         $this->transactionLock = $this->mutex->acquire();
@@ -124,8 +118,14 @@ final class Connection implements SqliteConnection
         }
 
         $this->closed = true;
-        $lock = $this->mutex->acquire();
 
+        if ($this->operationActive || $this->activeLeases > 0 || $this->activeTransaction !== null) {
+            $this->forceClose();
+
+            return;
+        }
+
+        $lock = $this->mutex->acquire();
         try {
             if (!$this->context->isClosed()) {
                 $id = $this->nextRequestId++;
@@ -134,11 +134,15 @@ final class Connection implements SqliteConnection
                 $this->context->join();
             }
         } catch (\Throwable) {
+            $this->forceClose();
+
+            return;
         } finally {
-            $this->context->close();
             $lock->release();
-            $this->onClose->complete();
         }
+
+        $this->context->close();
+        $this->onClose->complete();
     }
 
     public function isClosed(): bool
@@ -151,75 +155,40 @@ final class Connection implements SqliteConnection
         $this->onClose->getFuture()->finally($onClose);
     }
 
-    private function run(string $sql, array $params = [], bool $allowPlaceholders = true): SqliteResult
+    public function queryInTransaction(string $sql): SqliteResult
     {
-        if ($this->closed) {
-            throw new SqliteConnectionException('The SQLite connection is closed');
-        }
-
-        self::validateParameters($sql, $params, $allowPlaceholders, true);
-
-        $lock = $this->transactionLock ?? $this->mutex->acquire();
-        $releaseLock = $this->transactionLock === null;
-        $id = $this->nextRequestId++;
-
-        try {
-            $this->context->send([
-                'id' => $id,
-                'operation' => 'execute',
-                'sql' => $sql,
-                'params' => $params,
-            ]);
-            $response = $this->context->receive();
-        } catch (\Throwable $exception) {
-            if ($releaseLock) {
-                $lock->release();
-            }
-            $this->closed = true;
-            $this->context->close();
-            $this->onClose->complete();
-
-            throw new SqliteConnectionException('The SQLite child process stopped unexpectedly', previous: $exception);
-        }
-
-        $this->lastUsedAt = \time();
-
-        try {
-            $this->validateResponse($response, $id, $sql);
-        } catch (\Throwable $exception) {
-            if ($releaseLock) {
-                $lock->release();
-            }
-            throw $exception;
-        }
-
-        return $this->createResult($response['value'], $sql, $releaseLock ? $lock : null);
+        return $this->run($sql, [], false, true);
     }
 
-    public function executeStatement(int $statementId, string $sql, array $params): SqliteResult
+    public function prepareInTransaction(string $sql): SqliteStatement
     {
-        if ($this->closed) {
-            throw new SqliteConnectionException('The SQLite connection is closed');
-        }
+        return $this->prepareStatement($sql, true);
+    }
 
+    public function executeInTransaction(string $sql, array $params): SqliteResult
+    {
+        return $this->run($sql, $params, true, true);
+    }
+
+    public function executeStatement(int $statementId, string $sql, array $params, bool $transactional): SqliteResult
+    {
+        $this->assertOpen();
         self::validateParameters($sql, $params, true, true);
-        $lock = $this->transactionLock ?? $this->mutex->acquire();
-        $releaseLock = $this->transactionLock === null;
+        $lock = $this->acquire($transactional);
 
         try {
             $value = $this->request('executeStatement', $sql, ['statementId' => $statementId, 'params' => $params]);
         } catch (\Throwable $exception) {
-            if ($releaseLock) {
-                $lock->release();
-            }
+            $lock?->release();
             throw $exception;
         }
 
-        return $this->createResult($value, $sql, $releaseLock ? $lock : null);
+        return $this->createResult($value, $sql, $lock, $transactional);
     }
 
     public function executeControl(string $sql): void
     {
+        $this->awaitTransactionResource();
         $value = $this->request('execute', $sql, ['sql' => $sql, 'params' => []]);
         if ($value['resultId'] !== null) {
             $this->requestResult('closeResult', $value['resultId'], $sql);
@@ -228,57 +197,99 @@ final class Connection implements SqliteConnection
 
     public function releaseTransaction(Transaction $transaction): void
     {
-        if ($this->activeTransaction === $transaction) {
-            $this->activeTransaction = null;
-            $this->transactionLock?->release();
-            $this->transactionLock = null;
+        if ($this->activeTransaction !== $transaction) {
+            return;
         }
+
+        $this->activeTransaction = null;
+        $this->transactionLock?->release();
+        $this->transactionLock = null;
     }
 
-    public function closeStatement(int $statementId, string $sql): void
+    public function closeStatement(int $statementId, string $sql, bool $transactional): void
     {
         if ($this->closed) {
             return;
         }
 
-        $lock = $this->transactionLock ?? $this->mutex->acquire();
-        $releaseLock = $this->transactionLock === null;
+        $lock = $this->acquire($transactional);
         try {
             $this->request('closeStatement', $sql, ['statementId' => $statementId]);
         } finally {
-            if ($releaseLock) {
-                $lock->release();
-            }
+            $lock?->release();
         }
     }
 
-    private function requestResult(string $operation, int $resultId, string $sql): mixed
+    private function prepareStatement(string $sql, bool $transactional): SqliteStatement
     {
-        return $this->request($operation, $sql, ['resultId' => $resultId]);
-    }
-
-    private function request(string $operation, string $sql, array $data): mixed
-    {
-        $id = $this->nextRequestId++;
+        $this->assertOpen();
+        self::validateParameters($sql, [], true, false);
+        $lock = $this->acquire($transactional);
 
         try {
-            $this->context->send(['id' => $id, 'operation' => $operation, ...$data]);
-            $response = $this->context->receive();
-        } catch (\Throwable $exception) {
-            $this->closed = true;
-            $this->context->close();
-            $this->onClose->complete();
-
-            throw new SqliteConnectionException('The SQLite child process stopped unexpectedly', previous: $exception);
+            $value = $this->request('prepare', $sql, ['sql' => $sql]);
+        } finally {
+            $lock?->release();
         }
 
-        $this->validateResponse($response, $id, $sql);
-
-        return $response['value'];
+        return new Statement($this, $value['statementId'], $sql, $transactional);
     }
 
-    private function createResult(array $value, string $sql, ?\Amp\Sync\Lock $lock): SqliteResult
+    private function run(string $sql, array $params, bool $allowPlaceholders, bool $transactional): SqliteResult
     {
+        $this->assertOpen();
+        self::validateParameters($sql, $params, $allowPlaceholders, true);
+        $lock = $this->acquire($transactional);
+
+        try {
+            $value = $this->request('execute', $sql, ['sql' => $sql, 'params' => $params]);
+        } catch (\Throwable $exception) {
+            $lock?->release();
+            throw $exception;
+        }
+
+        return $this->createResult($value, $sql, $lock, $transactional);
+    }
+
+    private function acquire(bool $transactional): ?Lock
+    {
+        if (!$transactional) {
+            return $this->mutex->acquire();
+        }
+
+        if ($this->transactionLock === null) {
+            throw new SqliteTransactionError('The transaction is no longer active');
+        }
+
+        $this->awaitTransactionResource();
+
+        return null;
+    }
+
+    private function createResult(array $value, string $sql, ?Lock $lock, bool $transactional): SqliteResult
+    {
+        $onRelease = null;
+        if (!$value['exhausted']) {
+            ++$this->activeLeases;
+            if ($transactional) {
+                $this->transactionBusy = new DeferredFuture();
+            }
+
+            $released = false;
+            $onRelease = function () use (&$released, $transactional): void {
+                if ($released) {
+                    return;
+                }
+
+                $released = true;
+                --$this->activeLeases;
+                if ($transactional) {
+                    $this->transactionBusy?->complete();
+                    $this->transactionBusy = null;
+                }
+            };
+        }
+
         return new Result(
             $value['rows'],
             $value['rowCount'],
@@ -289,13 +300,47 @@ final class Connection implements SqliteConnection
             fn (int $resultId): array => $this->requestResult('fetch', $resultId, $sql),
             fn (int $resultId): mixed => $this->requestResult('closeResult', $resultId, $sql),
             $value['exhausted'] ? null : $lock,
+            $onRelease,
         );
+    }
+
+    private function requestResult(string $operation, int $resultId, string $sql): mixed
+    {
+        if ($this->closed && $operation === 'closeResult') {
+            return null;
+        }
+
+        return $this->request($operation, $sql, ['resultId' => $resultId]);
+    }
+
+    private function request(string $operation, string $sql, array $data): mixed
+    {
+        $id = $this->nextRequestId++;
+        $this->operationActive = true;
+
+        try {
+            $this->context->send(['id' => $id, 'operation' => $operation, ...$data]);
+            $response = $this->context->receive();
+        } catch (\Throwable $exception) {
+            $this->closed = true;
+            $this->forceClose();
+
+            throw new SqliteConnectionException('The SQLite child process stopped unexpectedly', previous: $exception);
+        } finally {
+            $this->operationActive = false;
+        }
+
+        $this->lastUsedAt = \time();
+        $this->validateResponse($response, $id, $sql);
+
+        return $response['value'];
     }
 
     private function validateResponse(mixed $response, int $id, string $sql): void
     {
         if (($response['id'] ?? null) !== $id) {
-            $this->close();
+            $this->closed = true;
+            $this->forceClose();
 
             throw new SqliteConnectionException('Received an invalid response from the SQLite child process');
         }
@@ -307,6 +352,33 @@ final class Connection implements SqliteConnection
                 $response['error']['code'],
                 $response['error']['extendedCode'],
             );
+        }
+    }
+
+    private function awaitTransactionResource(): void
+    {
+        while ($this->transactionBusy !== null) {
+            $this->transactionBusy->getFuture()->await();
+        }
+    }
+
+    private function assertOpen(): void
+    {
+        if ($this->closed) {
+            throw new SqliteConnectionException('The SQLite connection is closed');
+        }
+    }
+
+    private function forceClose(): void
+    {
+        $this->context->close();
+        try {
+            $this->context->join();
+        } catch (\Throwable) {
+        }
+
+        if (!$this->onClose->isComplete()) {
+            $this->onClose->complete();
         }
     }
 
@@ -348,7 +420,7 @@ final class Connection implements SqliteConnection
         }
 
         foreach ($params as $value) {
-            if ($value !== null && !\is_bool($value) && !\is_int($value) && !\is_float($value) && !\is_string($value) && !$value instanceof \Fabpot\Amp\Sqlite\SqliteBlob) {
+            if ($value !== null && !\is_bool($value) && !\is_int($value) && !\is_float($value) && !\is_string($value) && !$value instanceof SqliteBlob) {
                 throw new \TypeError('SQLite parameters must be null, bool, int, float, string, or SqliteBlob');
             }
         }

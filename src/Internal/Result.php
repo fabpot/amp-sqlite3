@@ -25,6 +25,7 @@ final class Result implements SqliteResult, \IteratorAggregate
      * @param list<array<string, null|bool|int|float|string|SqliteBlob>> $rows
      * @param null|\Closure(int):array{rows: list<array<string, null|bool|int|float|string|SqliteBlob>>, exhausted: bool} $fetch
      * @param null|\Closure(int):void $close
+     * @param null|\Closure():void $onRelease
      */
     public function __construct(
         private array $rows,
@@ -36,6 +37,7 @@ final class Result implements SqliteResult, \IteratorAggregate
         private readonly ?\Closure $fetch,
         private readonly ?\Closure $close,
         private readonly ?Lock $lock,
+        private readonly ?\Closure $onRelease,
     ) {
         $this->onClose = new DeferredFuture();
         $this->exhausted = $exhausted;
@@ -149,6 +151,7 @@ final class Result implements SqliteResult, \IteratorAggregate
         $this->closed = true;
         $this->rows = [];
         $this->lock?->release();
+        ($this->onRelease ?? static fn () => null)();
         $this->onClose->complete();
     }
 }
