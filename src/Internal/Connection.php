@@ -53,7 +53,16 @@ final class Connection implements SqliteConnection
 
     public function prepare(string $sql): SqliteStatement
     {
-        throw new \Error('Prepared statements are not implemented yet');
+        self::validateParameters($sql, [], true, false);
+        $lock = $this->mutex->acquire();
+
+        try {
+            $value = $this->request('prepare', $sql, ['sql' => $sql]);
+        } finally {
+            $lock->release();
+        }
+
+        return new Statement($this, $value['statementId'], $sql);
     }
 
     public function execute(string $sql, array $params = []): SqliteResult
@@ -129,7 +138,7 @@ final class Connection implements SqliteConnection
             throw new SqliteConnectionException('The SQLite connection is closed');
         }
 
-        self::validateParameters($sql, $params, $allowPlaceholders);
+        self::validateParameters($sql, $params, $allowPlaceholders, true);
 
         $lock = $this->mutex->acquire();
         $id = $this->nextRequestId++;
@@ -160,27 +169,53 @@ final class Connection implements SqliteConnection
             throw $exception;
         }
 
-        $value = $response['value'];
+        return $this->createResult($response['value'], $sql, $lock);
+    }
 
-        return new Result(
-            $value['rows'],
-            $value['rowCount'],
-            $value['columnCount'],
-            $value['lastInsertId'],
-            $value['resultId'],
-            $value['exhausted'],
-            fn (int $resultId): array => $this->requestResult('fetch', $resultId, $sql),
-            fn (int $resultId): mixed => $this->requestResult('closeResult', $resultId, $sql),
-            $value['exhausted'] ? null : $lock,
-        );
+    public function executeStatement(int $statementId, string $sql, array $params): SqliteResult
+    {
+        if ($this->closed) {
+            throw new SqliteConnectionException('The SQLite connection is closed');
+        }
+
+        self::validateParameters($sql, $params, true, true);
+        $lock = $this->mutex->acquire();
+
+        try {
+            $value = $this->request('executeStatement', $sql, ['statementId' => $statementId, 'params' => $params]);
+        } catch (\Throwable $exception) {
+            $lock->release();
+            throw $exception;
+        }
+
+        return $this->createResult($value, $sql, $lock);
+    }
+
+    public function closeStatement(int $statementId, string $sql): void
+    {
+        if ($this->closed) {
+            return;
+        }
+
+        $lock = $this->mutex->acquire();
+        try {
+            $this->request('closeStatement', $sql, ['statementId' => $statementId]);
+        } finally {
+            $lock->release();
+        }
     }
 
     private function requestResult(string $operation, int $resultId, string $sql): mixed
     {
+        return $this->request($operation, $sql, ['resultId' => $resultId]);
+    }
+
+    private function request(string $operation, string $sql, array $data): mixed
+    {
         $id = $this->nextRequestId++;
 
         try {
-            $this->context->send(['id' => $id, 'operation' => $operation, 'resultId' => $resultId]);
+            $this->context->send(['id' => $id, 'operation' => $operation, ...$data]);
             $response = $this->context->receive();
         } catch (\Throwable $exception) {
             $this->closed = true;
@@ -193,6 +228,21 @@ final class Connection implements SqliteConnection
         $this->validateResponse($response, $id, $sql);
 
         return $response['value'];
+    }
+
+    private function createResult(array $value, string $sql, ?\Amp\Sync\Lock $lock): SqliteResult
+    {
+        return new Result(
+            $value['rows'],
+            $value['rowCount'],
+            $value['columnCount'],
+            $value['lastInsertId'],
+            $value['resultId'],
+            $value['exhausted'],
+            fn (int $resultId): array => $this->requestResult('fetch', $resultId, $sql),
+            fn (int $resultId): mixed => $this->requestResult('closeResult', $resultId, $sql),
+            $value['exhausted'] ? null : $lock,
+        );
     }
 
     private function validateResponse(mixed $response, int $id, string $sql): void
@@ -213,7 +263,7 @@ final class Connection implements SqliteConnection
         }
     }
 
-    private static function validateParameters(string $sql, array $params, bool $allowPlaceholders): void
+    private static function validateParameters(string $sql, array $params, bool $allowPlaceholders, bool $validateValues): void
     {
         if (!SqlScanner::hasExecutableSql($sql)) {
             throw new SqliteQueryError('SQL must contain one statement', $sql);
@@ -227,6 +277,10 @@ final class Connection implements SqliteConnection
 
         if (!$allowPlaceholders && $placeholders !== []) {
             throw new SqliteQueryError('Placeholders are not allowed in direct queries', $sql);
+        }
+
+        if (!$validateValues) {
+            return;
         }
 
         $style = $styles[0] ?? null;

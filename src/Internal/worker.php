@@ -85,7 +85,10 @@ return static function (Channel $channel): null {
     $channel->send(['ready' => true]);
 
     $nextResultId = 1;
-    /** @var array<int, array{result: SQLite3Result, statement: SQLite3Stmt, pending: array<string, mixed>|null}> $results */
+    $nextStatementId = 1;
+    /** @var array<int, SQLite3Stmt> $statements */
+    $statements = [];
+    /** @var array<int, array{result: SQLite3Result, statement: SQLite3Stmt, statementId: int|null, pending: array<string, mixed>|null}> $results */
     $results = [];
 
     $convertRow = static function (SQLite3Result $result, array $row): array {
@@ -130,7 +133,9 @@ return static function (Channel $channel): null {
 
     $closeResult = static function (array $resource): void {
         $resource['result']->finalize();
-        $resource['statement']->close();
+        if ($resource['statementId'] === null) {
+            $resource['statement']->close();
+        }
     };
 
     while (($request = $channel->receive()) !== null) {
@@ -139,10 +144,41 @@ return static function (Channel $channel): null {
                 foreach ($results as $resource) {
                     $closeResult($resource);
                 }
+                foreach ($statements as $statement) {
+                    $statement->close();
+                }
                 $database->close();
                 $channel->send(['id' => $request['id'], 'value' => null]);
 
                 return null;
+            }
+
+            if ($request['operation'] === 'prepare') {
+                $statement = $database->prepare($request['sql']);
+                $consumedSql = $statement->getSQL();
+                if (SqlScanner::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
+                    $statement->close();
+                    throw new RuntimeException('Only one SQL statement may be prepared at a time');
+                }
+                $statementId = $nextStatementId++;
+                $statements[$statementId] = $statement;
+                $channel->send(['id' => $request['id'], 'value' => ['statementId' => $statementId]]);
+                continue;
+            }
+
+            if ($request['operation'] === 'closeStatement') {
+                if (isset($statements[$request['statementId']])) {
+                    foreach ($results as $resultId => $resource) {
+                        if ($resource['statementId'] === $request['statementId']) {
+                            $closeResult($resource);
+                            unset($results[$resultId]);
+                        }
+                    }
+                    $statements[$request['statementId']]->close();
+                    unset($statements[$request['statementId']]);
+                }
+                $channel->send(['id' => $request['id'], 'value' => null]);
+                continue;
             }
 
             if ($request['operation'] === 'fetch') {
@@ -168,16 +204,26 @@ return static function (Channel $channel): null {
                 continue;
             }
 
-            if ($request['operation'] !== 'execute') {
+            if ($request['operation'] !== 'execute' && $request['operation'] !== 'executeStatement') {
                 throw new RuntimeException("Unknown operation '{$request['operation']}'");
             }
 
             /** @var int $before */
             $before = $database->querySingle('SELECT total_changes()');
-            $statement = $database->prepare($request['sql']);
-            $consumedSql = $statement->getSQL();
-            if (SqlScanner::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
-                throw new RuntimeException('Only one SQL statement may be executed at a time');
+            $statementId = $request['statementId'] ?? null;
+            if ($statementId !== null) {
+                if (!isset($statements[$statementId])) {
+                    throw new RuntimeException("Unknown statement ID '{$statementId}'");
+                }
+                $statement = $statements[$statementId];
+                $statement->reset();
+                $statement->clear();
+            } else {
+                $statement = $database->prepare($request['sql']);
+                $consumedSql = $statement->getSQL();
+                if (SqlScanner::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
+                    throw new RuntimeException('Only one SQL statement may be executed at a time');
+                }
             }
 
             foreach ($request['params'] as $key => $value) {
@@ -207,7 +253,7 @@ return static function (Channel $channel): null {
 
             if ($columns > 0) {
                 $resultId = $nextResultId++;
-                $results[$resultId] = ['result' => $nativeResult, 'statement' => $statement, 'pending' => null];
+                $results[$resultId] = ['result' => $nativeResult, 'statement' => $statement, 'statementId' => $statementId, 'pending' => null];
                 $batch = $fetchBatch($results[$resultId]);
                 $value['resultId'] = $resultId;
                 $value['rows'] = $batch['rows'];
@@ -218,7 +264,9 @@ return static function (Channel $channel): null {
                 }
             } else {
                 $nativeResult->finalize();
-                $statement->close();
+                if ($statementId === null) {
+                    $statement->close();
+                }
             }
 
             $channel->send(['id' => $request['id'], 'value' => $value]);
@@ -236,6 +284,9 @@ return static function (Channel $channel): null {
 
     foreach ($results as $resource) {
         $closeResult($resource);
+    }
+    foreach ($statements as $statement) {
+        $statement->close();
     }
     $database->close();
 
