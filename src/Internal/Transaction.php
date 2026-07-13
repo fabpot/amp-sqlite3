@@ -111,11 +111,16 @@ final class Transaction implements SqliteTransaction
             $this->connection->executeControl($this->savepoint === null ? 'COMMIT' : "RELEASE SAVEPOINT {$this->savepoint}");
         } finally {
             $this->parent?->releaseNested($this);
-            $this->onCommit->complete();
-            $this->onClose->complete();
-            if ($this->savepoint === null) {
+            if ($this->parent === null) {
+                $this->onCommit->complete();
                 $this->connection->releaseTransaction($this);
+            } else {
+                $onCommit = $this->onCommit;
+                $this->parent->onCommit(static fn () => $onCommit->isComplete() || $onCommit->complete());
+                $onRollback = $this->onRollback;
+                $this->parent->onRollback(static fn () => $onRollback->isComplete() || $onRollback->complete());
             }
+            $this->onClose->complete();
         }
     }
 

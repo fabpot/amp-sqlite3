@@ -107,6 +107,24 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame([['value' => 'after result']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
+    public function testNestedCommitCallbackWaitsForTopLevelCommit(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $nested = $transaction->beginTransaction();
+        $commits = 0;
+        $nested->onCommit(static function () use (&$commits): void {
+            ++$commits;
+        });
+
+        $nested->commit();
+        EventLoop::run();
+        self::assertSame(0, $commits);
+
+        $transaction->commit();
+        EventLoop::run();
+        self::assertSame(1, $commits);
+    }
+
     public function testCallbacksRunOnce(): void
     {
         $transaction = $this->connection->beginTransaction();
