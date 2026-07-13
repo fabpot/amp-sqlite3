@@ -138,7 +138,7 @@ try {
 }
 ```
 
-`SqliteConnector` implements `Amp\Sql\SqlConnector`. Its contract-level argument is therefore `SqlConfig`, but it accepts only `SqliteConfig` instances and rejects other configurations with a `TypeError`.
+`SqliteConnector` implements `Amp\Sql\SqlConnector`. Its contract-level argument is therefore `SqlConfig`, but it accepts only `SqliteConfig` instances and rejects other configurations with a `TypeError`. This matches the runtime type check used by the AMPHP MySQL and PostgreSQL connectors.
 
 ### Interfaces
 
@@ -271,7 +271,7 @@ These typed settings are reserved and cannot also be supplied as additional prag
 - `trusted_schema`
 - `busy_timeout`
 
-Driver-managed settings are applied and read back before the connection is returned. A mismatch fails connection creation and reports the requested and effective values. Additional pragmas fail startup when execution fails and are read back when they produce a comparable scalar value.
+Driver-managed settings that the selected configuration actively sets are applied and read back before the connection is returned. An `Automatic` mode that preserves an existing SQLite value is not compared against a requested value. A mismatch for an actively set value fails connection creation and reports the requested and effective values. Additional pragmas fail startup when execution fails and are read back when they produce a comparable scalar value.
 
 ## Execution architecture
 
@@ -332,7 +332,7 @@ The protocol supports operations equivalent to:
 - Roll back to savepoint
 - Close connection
 
-Statements and row-producing results are referenced by monotonically assigned integer IDs. Unknown, stale, or mismatched IDs are protocol errors and close the logical connection.
+Statements and row-producing results are referenced by monotonically assigned integer IDs. Closing a result or statement is idempotent in both processes: a child-side close request for an ID that was allocated with the same resource type and has already been released is a benign no-op. A close request for a never-allocated or mismatched ID remains a protocol error. The parent does not send cleanup requests after connection-level invalidation. Every non-close operation using an unknown, stale, or mismatched ID is also a protocol error and closes the logical connection.
 
 Every response identifies the request it completes. The initial implementation serializes operations and allows only one in-flight request, but request identity keeps protocol failures detectable and leaves room for internal evolution.
 
@@ -362,9 +362,9 @@ A replacement process would create a new SQLite session and could not preserve t
 
 ### Single-statement rule
 
-`query()`, `execute()`, and `prepare()` accept exactly one SQL statement. Trailing whitespace and comments are allowed. A second statement is rejected with `SqliteQueryError`.
+`query()`, `execute()`, and `prepare()` accept exactly one SQL statement. Empty, whitespace-only, comment-only, and semicolon-only input is rejected with `SqliteQueryError`. Trailing whitespace and comments are allowed. A second statement is rejected with `SqliteQueryError`.
 
-The child prepares the SQL with SQLite and uses `SQLite3Stmt::getSQL()` to determine how much input the native parser consumed. Any remaining input must contain only whitespace or comments. This supports valid compound statements such as trigger definitions without implementing a partial SQL parser, while still rejecting a second statement.
+The child prepares the SQL with SQLite and uses `SQLite3Stmt::getSQL()` to determine how much input the native parser consumed. Any remaining input must contain only whitespace or comments. This supports valid compound statements such as trigger definitions without implementing a partial SQL parser, while still rejecting a second statement. Phase 3 must verify this consumed-prefix behavior across supported PHP versions with both the minimum and current SQLite versions before the implementation relies on it; if it is not stable, the implementation must use another SQLite-aware boundary mechanism without weakening the single-statement rule.
 
 Multiple-result behavior is not supported. `SqliteResult::getNextResult()` always returns `null`.
 
@@ -499,8 +499,10 @@ For row-producing statements:
 
 For command statements:
 
-- `getRowCount()` returns `SQLite3::changes()` captured immediately after execution.
+- `getRowCount()` returns the difference in SQLite's `total_changes()` value immediately before and after execution.
 - `getColumnCount()` returns `null`.
+
+The delta is zero for DDL instead of leaking a stale count from an earlier DML statement. It includes rows changed by triggers, matching SQLite's native `total_changes()` semantics.
 
 `getLastInsertId()` always returns the value of `SQLite3::lastInsertRowID()` captured immediately after the statement executes. It returns an integer, including `0` when no insert has occurred on the connection. This is SQLite connection state captured after the statement, not a guarantee that the statement itself inserted a row.
 
@@ -565,9 +567,9 @@ Errors map onto the AMPHP SQL hierarchy:
 - `SqliteException` extends `Amp\Sql\SqlException` for other driver failures.
 - `SqliteTransactionError` extends `Amp\Sql\SqlTransactionError` for invalid transaction lifecycle operations.
 
-SQLite-originated exceptions expose the primary and extended SQLite result codes. Query errors retain the SQL string but never interpolate or include bound parameter values.
+SQLite-originated exceptions expose the primary and extended SQLite result codes. Query errors retain the SQL string but never interpolate or include bound parameter values. If SQLite fails while stepping a live cursor for another batch, `fetchRow()` or iteration throws `SqliteQueryError`; the result then closes and releases its connection lease.
 
-Malformed protocol responses, invalid resource IDs, and impossible state transitions are treated as connection failures because the parent can no longer trust the child state.
+Malformed protocol responses, non-close operations on invalid resource IDs, and impossible state transitions are treated as connection failures because the parent can no longer trust the child state.
 
 ## Security considerations
 
@@ -654,11 +656,15 @@ Tests must cover:
 - Results smaller than, equal to, and larger than the batch size.
 - `fetchRow()` and iteration sharing the same local batch state.
 - Empty results.
+- Mid-stream SQLite errors.
 - Early explicit closure.
+- Races between automatic and best-effort closure.
 - Abandoned-result cleanup.
 - Large BLOB values.
 - Connection queue release after exhaustion and closure.
 - Stable `null` row counts for row-producing results.
+- Zero affected rows for DDL executed after DML.
+- Trigger changes included in command row counts.
 
 ### Parameters and types
 
@@ -669,6 +675,8 @@ Tests must cover:
 - Mixed parameter styles.
 - Repeated named placeholders.
 - Rejection of unsupported placeholder forms.
+- Rejection of empty, whitespace-only, comment-only, and semicolon-only SQL.
+- Consumed-prefix behavior across supported PHP versions with the minimum and current SQLite versions.
 - Null, boolean, integer, float, text, and BLOB bindings.
 - BLOB round trips through `SqliteBlob`.
 - Rejection of unsupported PHP values.
@@ -733,6 +741,7 @@ Tests must cover:
 
 - Implement native single-statement validation and the placeholder scanner.
 - Implement direct query and temporary statement execution.
+- Verify native consumed-prefix behavior on all supported runtimes.
 - Implement command results and batched row-producing results.
 - Implement explicit result closure and abandoned-result cleanup.
 - Add streaming, typing, and non-blocking tests.
