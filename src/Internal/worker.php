@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Amp\Sync\Channel;
+use Fabpot\Amp\Sqlite\Internal\SqlScanner;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
@@ -16,6 +17,7 @@ return static function (Channel $channel): null {
      *     synchronousMode: string,
      *     foreignKeys: bool,
      *     busyTimeout: int,
+     *     batchSize: positive-int,
      *     trustedSchema: bool,
      *     extendedResultCodes: bool,
      *     pragmas: array<string, null|bool|int|float|string>
@@ -24,12 +26,12 @@ return static function (Channel $channel): null {
     $open = $channel->receive();
 
     if (!extension_loaded('sqlite3')) {
-        throw new \RuntimeException('The sqlite3 extension is not loaded');
+        throw new RuntimeException('The sqlite3 extension is not loaded');
     }
 
     $version = SQLite3::version()['versionString'];
     if (version_compare($version, '3.31.0', '<')) {
-        throw new \RuntimeException("SQLite 3.31.0 or newer is required, {$version} is installed");
+        throw new RuntimeException("SQLite 3.31.0 or newer is required, {$version} is installed");
     }
 
     $flags = match ($open['openMode']) {
@@ -61,12 +63,12 @@ return static function (Channel $channel): null {
     if ($open['journalMode'] !== SqliteJournalMode::Automatic->value) {
         $effective = $pragma('journal_mode', $open['journalMode']);
         if (strtolower((string) $effective) !== $open['journalMode']) {
-            throw new \RuntimeException("Could not enable requested journal mode '{$open['journalMode']}'");
+            throw new RuntimeException("Could not enable requested journal mode '{$open['journalMode']}'");
         }
     } elseif ($open['path'] !== ':memory:' && $open['openMode'] !== SqliteOpenMode::ReadOnly->name) {
         $effective = $pragma('journal_mode', 'wal');
         if (strtolower((string) $effective) !== 'wal') {
-            throw new \RuntimeException("Could not enable WAL journal mode, SQLite selected '{$effective}'");
+            throw new RuntimeException("Could not enable WAL journal mode, SQLite selected '{$effective}'");
         }
     }
 
@@ -82,22 +84,102 @@ return static function (Channel $channel): null {
 
     $channel->send(['ready' => true]);
 
+    $nextResultId = 1;
+    /** @var array<int, array{result: SQLite3Result, statement: SQLite3Stmt, pending: array<string, mixed>|null}> $results */
+    $results = [];
+
+    $convertRow = static function (SQLite3Result $result, array $row): array {
+        $columnTypes = [];
+        for ($column = 0, $columns = $result->numColumns(); $column < $columns; ++$column) {
+            $columnTypes[$result->columnName($column)] = $result->columnType($column);
+        }
+
+        foreach ($row as $name => $value) {
+            if ($columnTypes[$name] === SQLITE3_BLOB && is_string($value)) {
+                $row[$name] = new SqliteBlob($value);
+            }
+        }
+
+        return $row;
+    };
+
+    $fetchBatch = static function (array &$resource) use ($convertRow, $open): array {
+        $rows = [];
+        if ($resource['pending'] !== null) {
+            $rows[] = $resource['pending'];
+            $resource['pending'] = null;
+        }
+
+        while (count($rows) < $open['batchSize']) {
+            $row = $resource['result']->fetchArray(SQLITE3_ASSOC);
+            if ($row === false) {
+                return ['rows' => $rows, 'exhausted' => true];
+            }
+            $rows[] = $convertRow($resource['result'], $row);
+        }
+
+        $row = $resource['result']->fetchArray(SQLITE3_ASSOC);
+        if ($row === false) {
+            return ['rows' => $rows, 'exhausted' => true];
+        }
+
+        $resource['pending'] = $convertRow($resource['result'], $row);
+
+        return ['rows' => $rows, 'exhausted' => false];
+    };
+
+    $closeResult = static function (array $resource): void {
+        $resource['result']->finalize();
+        $resource['statement']->close();
+    };
+
     while (($request = $channel->receive()) !== null) {
         try {
             if ($request['operation'] === 'close') {
+                foreach ($results as $resource) {
+                    $closeResult($resource);
+                }
                 $database->close();
                 $channel->send(['id' => $request['id'], 'value' => null]);
 
                 return null;
             }
 
+            if ($request['operation'] === 'fetch') {
+                if (!isset($results[$request['resultId']])) {
+                    throw new RuntimeException("Unknown result ID '{$request['resultId']}'");
+                }
+
+                $batch = $fetchBatch($results[$request['resultId']]);
+                if ($batch['exhausted']) {
+                    $closeResult($results[$request['resultId']]);
+                    unset($results[$request['resultId']]);
+                }
+                $channel->send(['id' => $request['id'], 'value' => $batch]);
+                continue;
+            }
+
+            if ($request['operation'] === 'closeResult') {
+                if (isset($results[$request['resultId']])) {
+                    $closeResult($results[$request['resultId']]);
+                    unset($results[$request['resultId']]);
+                }
+                $channel->send(['id' => $request['id'], 'value' => null]);
+                continue;
+            }
+
             if ($request['operation'] !== 'execute') {
-                throw new \RuntimeException("Unknown operation '{$request['operation']}'");
+                throw new RuntimeException("Unknown operation '{$request['operation']}'");
             }
 
             /** @var int $before */
             $before = $database->querySingle('SELECT total_changes()');
             $statement = $database->prepare($request['sql']);
+            $consumedSql = $statement->getSQL();
+            if (SqlScanner::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
+                throw new RuntimeException('Only one SQL statement may be executed at a time');
+            }
+
             foreach ($request['params'] as $key => $value) {
                 $position = is_int($key) ? $key + 1 : $key;
                 $type = match (true) {
@@ -112,37 +194,34 @@ return static function (Channel $channel): null {
 
             $nativeResult = $statement->execute();
             $columns = $nativeResult->numColumns();
-            $rows = [];
-            $columnTypes = [];
-            for ($column = 0; $column < $columns; ++$column) {
-                $columnTypes[$nativeResult->columnName($column)] = $nativeResult->columnType($column);
-            }
-
-            if ($columns > 0) {
-                while ($row = $nativeResult->fetchArray(SQLITE3_ASSOC)) {
-                    foreach ($row as $name => $value) {
-                        if ($columnTypes[$name] === SQLITE3_BLOB && is_string($value)) {
-                            $row[$name] = new SqliteBlob($value);
-                        }
-                    }
-                    $rows[] = $row;
-                }
-            }
-
-            $nativeResult->finalize();
-            $statement->close();
             /** @var int $after */
             $after = $database->querySingle('SELECT total_changes()');
+            $value = [
+                'resultId' => null,
+                'rows' => [],
+                'exhausted' => true,
+                'rowCount' => $columns > 0 ? null : $after - $before,
+                'columnCount' => $columns ?: null,
+                'lastInsertId' => $database->lastInsertRowID(),
+            ];
 
-            $channel->send([
-                'id' => $request['id'],
-                'value' => [
-                    'rows' => $rows,
-                    'rowCount' => $columns > 0 ? null : $after - $before,
-                    'columnCount' => $columns ?: null,
-                    'lastInsertId' => $database->lastInsertRowID(),
-                ],
-            ]);
+            if ($columns > 0) {
+                $resultId = $nextResultId++;
+                $results[$resultId] = ['result' => $nativeResult, 'statement' => $statement, 'pending' => null];
+                $batch = $fetchBatch($results[$resultId]);
+                $value['resultId'] = $resultId;
+                $value['rows'] = $batch['rows'];
+                $value['exhausted'] = $batch['exhausted'];
+                if ($batch['exhausted']) {
+                    $closeResult($results[$resultId]);
+                    unset($results[$resultId]);
+                }
+            } else {
+                $nativeResult->finalize();
+                $statement->close();
+            }
+
+            $channel->send(['id' => $request['id'], 'value' => $value]);
         } catch (Throwable $exception) {
             $channel->send([
                 'id' => $request['id'],
@@ -155,6 +234,9 @@ return static function (Channel $channel): null {
         }
     }
 
+    foreach ($results as $resource) {
+        $closeResult($resource);
+    }
     $database->close();
 
     return null;

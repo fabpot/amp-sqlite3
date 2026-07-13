@@ -54,6 +54,7 @@ final class SqliteConnector implements SqlConnector
                 'synchronousMode' => $config->getSynchronousMode()->value,
                 'foreignKeys' => $config->hasForeignKeys(),
                 'busyTimeout' => $config->getBusyTimeout(),
+                'batchSize' => $config->getBatchSize(),
                 'trustedSchema' => $config->hasTrustedSchema(),
                 'extendedResultCodes' => $config->hasExtendedResultCodes(),
                 'pragmas' => $config->getPragmas(),

@@ -5,33 +5,70 @@ declare(strict_types=1);
 namespace Fabpot\Amp\Sqlite\Internal;
 
 use Amp\DeferredFuture;
+use Amp\ForbidCloning;
+use Amp\ForbidSerialization;
+use Amp\Sync\Lock;
+use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteResult;
 
-/** @implements \IteratorAggregate<int, array<string, null|bool|int|float|string|\Fabpot\Amp\Sqlite\SqliteBlob>> */
+/** @implements \IteratorAggregate<int, array<string, null|bool|int|float|string|SqliteBlob>> */
 final class Result implements SqliteResult, \IteratorAggregate
 {
+    use ForbidCloning;
+    use ForbidSerialization;
+
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
+    private bool $exhausted;
 
-    /** @param list<array<string, null|bool|int|float|string|\Fabpot\Amp\Sqlite\SqliteBlob>> $rows */
+    /**
+     * @param list<array<string, null|bool|int|float|string|SqliteBlob>> $rows
+     * @param null|\Closure(int):array{rows: list<array<string, null|bool|int|float|string|SqliteBlob>>, exhausted: bool} $fetch
+     * @param null|\Closure(int):void $close
+     */
     public function __construct(
         private array $rows,
         private readonly ?int $rowCount,
         private readonly ?int $columnCount,
         private readonly int $lastInsertId,
+        private readonly ?int $resultId,
+        bool $exhausted,
+        private readonly ?\Closure $fetch,
+        private readonly ?\Closure $close,
+        private readonly ?Lock $lock,
     ) {
         $this->onClose = new DeferredFuture();
+        $this->exhausted = $exhausted;
+
+        if ($exhausted && $rows === []) {
+            $this->finish();
+        }
+    }
+
+    public function __destruct()
+    {
+        $this->close();
     }
 
     public function fetchRow(): ?array
     {
         if ($this->closed) {
-            return null;
+            throw new \Error('The SQLite result is closed');
+        }
+
+        if ($this->rows === []) {
+            $this->fetchNextBatch();
         }
 
         $row = \array_shift($this->rows);
         if ($row === null) {
-            $this->close();
+            $this->finish();
+
+            return null;
+        }
+
+        if ($this->rows === [] && $this->exhausted) {
+            $this->finish();
         }
 
         return $row;
@@ -39,7 +76,7 @@ final class Result implements SqliteResult, \IteratorAggregate
 
     public function getIterator(): \Traversable
     {
-        while (($row = $this->fetchRow()) !== null) {
+        while (!$this->closed && ($row = $this->fetchRow()) !== null) {
             yield $row;
         }
     }
@@ -70,9 +107,13 @@ final class Result implements SqliteResult, \IteratorAggregate
             return;
         }
 
-        $this->closed = true;
-        $this->rows = [];
-        $this->onClose->complete();
+        try {
+            if ($this->resultId !== null && $this->close !== null) {
+                ($this->close)($this->resultId);
+            }
+        } finally {
+            $this->finish();
+        }
     }
 
     public function isClosed(): bool
@@ -83,5 +124,31 @@ final class Result implements SqliteResult, \IteratorAggregate
     public function onClose(\Closure $onClose): void
     {
         $this->onClose->getFuture()->finally($onClose);
+    }
+
+    private function fetchNextBatch(): void
+    {
+        if ($this->resultId === null || $this->fetch === null) {
+            return;
+        }
+
+        $batch = ($this->fetch)($this->resultId);
+        $this->rows = $batch['rows'];
+        $this->exhausted = $batch['exhausted'];
+        if ($this->exhausted && $this->rows === []) {
+            $this->finish();
+        }
+    }
+
+    private function finish(): void
+    {
+        if ($this->closed) {
+            return;
+        }
+
+        $this->closed = true;
+        $this->rows = [];
+        $this->lock?->release();
+        $this->onClose->complete();
     }
 }

@@ -48,7 +48,7 @@ final class Connection implements SqliteConnection
 
     public function query(string $sql): SqliteResult
     {
-        return $this->run($sql);
+        return $this->run($sql, [], false);
     }
 
     public function prepare(string $sql): SqliteStatement
@@ -123,11 +123,13 @@ final class Connection implements SqliteConnection
         $this->onClose->getFuture()->finally($onClose);
     }
 
-    private function run(string $sql, array $params = []): SqliteResult
+    private function run(string $sql, array $params = [], bool $allowPlaceholders = true): SqliteResult
     {
         if ($this->closed) {
             throw new SqliteConnectionException('The SQLite connection is closed');
         }
+
+        self::validateParameters($sql, $params, $allowPlaceholders);
 
         $lock = $this->mutex->acquire();
         $id = $this->nextRequestId++;
@@ -141,17 +143,60 @@ final class Connection implements SqliteConnection
             ]);
             $response = $this->context->receive();
         } catch (\Throwable $exception) {
+            $lock->release();
             $this->closed = true;
             $this->context->close();
             $this->onClose->complete();
 
             throw new SqliteConnectionException('The SQLite child process stopped unexpectedly', previous: $exception);
-        } finally {
-            $lock->release();
         }
 
         $this->lastUsedAt = \time();
 
+        try {
+            $this->validateResponse($response, $id, $sql);
+        } catch (\Throwable $exception) {
+            $lock->release();
+            throw $exception;
+        }
+
+        $value = $response['value'];
+
+        return new Result(
+            $value['rows'],
+            $value['rowCount'],
+            $value['columnCount'],
+            $value['lastInsertId'],
+            $value['resultId'],
+            $value['exhausted'],
+            fn (int $resultId): array => $this->requestResult('fetch', $resultId, $sql),
+            fn (int $resultId): mixed => $this->requestResult('closeResult', $resultId, $sql),
+            $value['exhausted'] ? null : $lock,
+        );
+    }
+
+    private function requestResult(string $operation, int $resultId, string $sql): mixed
+    {
+        $id = $this->nextRequestId++;
+
+        try {
+            $this->context->send(['id' => $id, 'operation' => $operation, 'resultId' => $resultId]);
+            $response = $this->context->receive();
+        } catch (\Throwable $exception) {
+            $this->closed = true;
+            $this->context->close();
+            $this->onClose->complete();
+
+            throw new SqliteConnectionException('The SQLite child process stopped unexpectedly', previous: $exception);
+        }
+
+        $this->validateResponse($response, $id, $sql);
+
+        return $response['value'];
+    }
+
+    private function validateResponse(mixed $response, int $id, string $sql): void
+    {
         if (($response['id'] ?? null) !== $id) {
             $this->close();
 
@@ -166,12 +211,45 @@ final class Connection implements SqliteConnection
                 $response['error']['extendedCode'],
             );
         }
+    }
 
-        return new Result(
-            $response['value']['rows'],
-            $response['value']['rowCount'],
-            $response['value']['columnCount'],
-            $response['value']['lastInsertId'],
-        );
+    private static function validateParameters(string $sql, array $params, bool $allowPlaceholders): void
+    {
+        if (!SqlScanner::hasExecutableSql($sql)) {
+            throw new SqliteQueryError('SQL must contain one statement', $sql);
+        }
+
+        $placeholders = SqlScanner::placeholders($sql);
+        $styles = \array_unique(\array_column($placeholders, 'style'));
+        if (\in_array('unsupported', $styles, true) || \count($styles) > 1) {
+            throw new SqliteQueryError('Unsupported or mixed parameter placeholders', $sql);
+        }
+
+        if (!$allowPlaceholders && $placeholders !== []) {
+            throw new SqliteQueryError('Placeholders are not allowed in direct queries', $sql);
+        }
+
+        $style = $styles[0] ?? null;
+        if ($style === 'positional') {
+            if (!\array_is_list($params) || \count($params) !== \count($placeholders)) {
+                throw new SqliteQueryError('Positional parameters do not match the placeholders', $sql);
+            }
+        } elseif ($style === 'named') {
+            $names = \array_values(\array_unique(\array_column($placeholders, 'name')));
+            $keys = \array_keys($params);
+            \sort($names);
+            \sort($keys);
+            if ($names !== $keys) {
+                throw new SqliteQueryError('Named parameters do not match the placeholders', $sql);
+            }
+        } elseif ($params !== []) {
+            throw new SqliteQueryError('Parameters were provided but the statement has no placeholders', $sql);
+        }
+
+        foreach ($params as $value) {
+            if ($value !== null && !\is_bool($value) && !\is_int($value) && !\is_float($value) && !\is_string($value) && !$value instanceof \Fabpot\Amp\Sqlite\SqliteBlob) {
+                throw new \TypeError('SQLite parameters must be null, bool, int, float, string, or SqliteBlob');
+            }
+        }
     }
 }
