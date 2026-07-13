@@ -35,6 +35,13 @@ final class Transaction implements SqliteTransaction
         $this->onCommit = new DeferredFuture();
         $this->onRollback = new DeferredFuture();
         $this->onClose = new DeferredFuture();
+        $connection->onClose(function (): void {
+            if ($this->active) {
+                $this->active = false;
+                $this->onRollback->complete();
+                $this->onClose->complete();
+            }
+        });
     }
 
     public function __destruct()
@@ -152,9 +159,19 @@ final class Transaction implements SqliteTransaction
 
     public function close(): void
     {
-        if ($this->active) {
-            $this->rollback();
+        if (!$this->active) {
+            return;
         }
+
+        if ($this->connection->isClosed()) {
+            $this->active = false;
+            $this->onRollback->complete();
+            $this->onClose->complete();
+
+            return;
+        }
+
+        $this->rollback();
     }
 
     public function isClosed(): bool

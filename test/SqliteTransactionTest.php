@@ -126,6 +126,30 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame(0, $rollbacks);
     }
 
+    public function testConnectionFailureRunsRollbackCallback(): void
+    {
+        $factory = new RecordingProcessContextFactory();
+        $connection = (new SqliteConnector($factory))->connect(new SqliteConfig(':memory:'));
+        $transaction = $connection->beginTransaction();
+        $rollbacks = 0;
+        $transaction->onRollback(static function () use (&$rollbacks): void {
+            ++$rollbacks;
+        });
+
+        $factory->context->close();
+
+        try {
+            $transaction->query('SELECT 1');
+            self::fail('Expected the connection to fail');
+        } catch (\Amp\Sql\SqlConnectionException) {
+        }
+        EventLoop::run();
+
+        self::assertFalse($transaction->isActive());
+        self::assertSame(1, $rollbacks);
+        $connection->close();
+    }
+
     public function testCloseRollsBack(): void
     {
         $transaction = $this->connection->beginTransaction();
@@ -133,5 +157,15 @@ final class SqliteTransactionTest extends TestCase
         $transaction->close();
 
         self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+}
+
+final class RecordingProcessContextFactory implements \Amp\Parallel\Context\ContextFactory
+{
+    public \Amp\Parallel\Context\ProcessContext $context;
+
+    public function start(string|array $script, ?\Amp\Cancellation $cancellation = null): \Amp\Parallel\Context\Context
+    {
+        return $this->context = (new \Amp\Parallel\Context\ProcessContextFactory())->start($script, $cancellation);
     }
 }
