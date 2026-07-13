@@ -9,7 +9,7 @@ use Amp\Sql\SqlConnection;
 /**
  * @extends SqlConnection<SqliteConfig, SqliteResult, SqliteStatement, SqliteTransaction>
  */
-interface SqliteConnection extends SqlConnection, SqliteLink
+interface SqliteConnection extends SqliteLink, SqlConnection
 {
     public function getConfig(): SqliteConfig;
 }

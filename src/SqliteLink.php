@@ -9,7 +9,7 @@ use Amp\Sql\SqlLink;
 /**
  * @extends SqlLink<SqliteResult, SqliteStatement, SqliteTransaction>
  */
-interface SqliteLink extends SqlLink, SqliteExecutor
+interface SqliteLink extends SqliteExecutor, SqlLink
 {
     public function beginTransaction(): SqliteTransaction;
 }

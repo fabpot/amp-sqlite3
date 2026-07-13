@@ -1,0 +1,154 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fabpot\Amp\Sqlite\Test;
+
+use Amp\Sql\SqlConfig;
+use Fabpot\Amp\Sqlite\SqliteConfig;
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
+use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteJournalMode;
+use Fabpot\Amp\Sqlite\SqliteOpenMode;
+use PHPUnit\Framework\TestCase;
+
+final class SqliteConnectionTest extends TestCase
+{
+    public function testKeepsMemoryDatabaseStateInDedicatedProcess(): void
+    {
+        $connection = (new SqliteConnector())->connect(new SqliteConfig(':memory:'));
+
+        try {
+            $connection->query('CREATE TABLE users (name TEXT NOT NULL)');
+            $connection->execute('INSERT INTO users VALUES (?)', ['Fabien']);
+
+            self::assertSame(['name' => 'Fabien'], $connection->query('SELECT name FROM users')->fetchRow());
+        } finally {
+            $connection->close();
+        }
+    }
+
+    public function testAppliesMemoryDatabaseDefaults(): void
+    {
+        $connection = (new SqliteConnector())->connect(new SqliteConfig(':memory:'));
+
+        try {
+            self::assertSame(['foreign_keys' => 1], $connection->query('PRAGMA foreign_keys')->fetchRow());
+            self::assertSame(['trusted_schema' => 0], $connection->query('PRAGMA trusted_schema')->fetchRow());
+            self::assertSame(['journal_mode' => 'memory'], $connection->query('PRAGMA journal_mode')->fetchRow());
+        } finally {
+            $connection->close();
+        }
+    }
+
+    public function testResolvesRelativePathBeforeStartingChild(): void
+    {
+        $directory = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8));
+        \mkdir($directory);
+        $workingDirectory = \getcwd();
+        \chdir($directory);
+
+        try {
+            $connection = (new SqliteConnector())->connect(new SqliteConfig('database.sqlite'));
+            $connection->close();
+
+            self::assertFileExists($directory . '/database.sqlite');
+        } finally {
+            \chdir($workingDirectory);
+            @\unlink($directory . '/database.sqlite');
+            @\rmdir($directory);
+        }
+    }
+
+    public function testRejectsNonSqliteConfig(): void
+    {
+        $config = new class('', 0) extends SqlConfig {
+        };
+
+        $this->expectException(\TypeError::class);
+
+        (new SqliteConnector())->connect($config);
+    }
+
+    public function testRejectsInheritedServerConfiguration(): void
+    {
+        $this->expectException(\ValueError::class);
+
+        (new SqliteConnector())->connect((new SqliteConfig(':memory:'))->withHost('localhost'));
+    }
+
+    public function testRevalidatesInheritedDatabaseMutation(): void
+    {
+        $this->expectException(\ValueError::class);
+
+        (new SqliteConnector())->connect((new SqliteConfig(':memory:'))->withDatabase('file:database.sqlite'));
+    }
+
+    public function testRejectsMissingDatabaseInReadWriteMode(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $config = (new SqliteConfig($path))->withOpenMode(SqliteOpenMode::ReadWrite);
+
+        $this->expectException(SqliteConnectionException::class);
+
+        (new SqliteConnector())->connect($config);
+    }
+
+    public function testEnablesWalForWritableFileDatabase(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $connection = (new SqliteConnector())->connect(new SqliteConfig($path));
+
+        try {
+            self::assertSame(['journal_mode' => 'wal'], $connection->query('PRAGMA journal_mode')->fetchRow());
+            self::assertSame(['synchronous' => 1], $connection->query('PRAGMA synchronous')->fetchRow());
+        } finally {
+            $connection->close();
+            @\unlink($path);
+            @\unlink($path . '-shm');
+            @\unlink($path . '-wal');
+        }
+    }
+
+    public function testReadOnlyConnectionPreservesJournalMode(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $database = new \SQLite3($path);
+        $database->close();
+        $config = (new SqliteConfig($path))->withOpenMode(SqliteOpenMode::ReadOnly);
+        $connection = (new SqliteConnector())->connect($config);
+
+        try {
+            self::assertSame(['journal_mode' => 'delete'], $connection->query('PRAGMA journal_mode')->fetchRow());
+        } finally {
+            $connection->close();
+            @\unlink($path);
+        }
+    }
+
+    public function testAppliesAdditionalPragmas(): void
+    {
+        $config = (new SqliteConfig(':memory:'))->withPragma('cache_size', -123);
+        $connection = (new SqliteConnector())->connect($config);
+
+        try {
+            self::assertSame(['cache_size' => -123], $connection->query('PRAGMA cache_size')->fetchRow());
+        } finally {
+            $connection->close();
+        }
+    }
+
+    public function testUsesExplicitJournalMode(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $config = (new SqliteConfig($path))->withJournalMode(SqliteJournalMode::Delete);
+        $connection = (new SqliteConnector())->connect($config);
+
+        try {
+            self::assertSame(['journal_mode' => 'delete'], $connection->query('PRAGMA journal_mode')->fetchRow());
+        } finally {
+            $connection->close();
+            @\unlink($path);
+        }
+    }
+}

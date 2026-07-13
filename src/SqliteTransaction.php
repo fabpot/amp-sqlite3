@@ -9,6 +9,6 @@ use Amp\Sql\SqlTransaction;
 /**
  * @extends SqlTransaction<SqliteResult, SqliteStatement, SqliteTransaction>
  */
-interface SqliteTransaction extends SqlTransaction, SqliteLink
+interface SqliteTransaction extends SqliteLink, SqlTransaction
 {
 }
