@@ -184,6 +184,17 @@ $config = (new SqliteConfig(__DIR__ . '/database.sqlite'))
 
 Configuration is validated when it is created or cloned.
 
+### Inherited generic settings
+
+`Amp\Sql\SqlConfig` models host-based databases and exposes final `getHost()`, `getPort()`, `getUser()`, `getPassword()`, and `getDatabase()` accessors with matching `with*()` methods. SQLite has no server, so `SqliteConfig` fixes the parent state at construction: an empty host, port `0`, and `null` user and password.
+
+The database path is stored as the parent database value. `getDatabase()` therefore returns the configured path, and `withDatabase()` changes it.
+
+The inherited `with*()` methods are declared `final` upstream, so `SqliteConfig` cannot make them throw when they are called. Invalid mutations are rejected at connection time instead:
+
+- `SqliteConnector::connect()` throws a `ValueError` when the host, port, user, or password differ from the fixed construction values, which can only result from calling `withHost()`, `withPort()`, `withUser()`, or `withPassword()`.
+- `withDatabase()` bypasses SQLite-specific path validation at call time, so `SqliteConnector::connect()` re-validates the effective path with the same rules as the constructor before starting the child process.
+
 ### Open modes
 
 `SqliteOpenMode` provides exactly these modes:
@@ -687,6 +698,8 @@ Tests must cover:
 - Additional pragma validation.
 - Relative path resolution.
 - Missing files and missing directories.
+- Connect-time rejection of configurations mutated through inherited host, port, user, or password methods.
+- Connect-time re-validation of paths changed through `withDatabase()`.
 - Minimum SQLite version behavior where injectable startup metadata permits it.
 
 ### Failure handling
