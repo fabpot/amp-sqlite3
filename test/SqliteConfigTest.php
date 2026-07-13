@@ -7,6 +7,7 @@ namespace Fabpot\Amp\Sqlite\Test;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
+use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
 use PHPUnit\Framework\TestCase;
 
 final class SqliteConfigTest extends TestCase
@@ -120,6 +121,15 @@ final class SqliteConfigTest extends TestCase
         (new SqliteConfig('database.sqlite'))
             ->withJournalMode(SqliteJournalMode::Wal)
             ->withOpenMode(SqliteOpenMode::ReadOnly);
+    }
+
+    public function testRejectsExplicitSynchronousModeForReadOnlyConnections(): void
+    {
+        $this->expectException(\ValueError::class);
+
+        (new SqliteConfig('database.sqlite'))
+            ->withOpenMode(SqliteOpenMode::ReadOnly)
+            ->withSynchronousMode(SqliteSynchronousMode::Full);
     }
 
     public function testAdditionalPragmasAreReplacedImmutably(): void

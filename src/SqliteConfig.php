@@ -73,6 +73,7 @@ final class SqliteConfig extends SqlConfig
     {
         $config = clone $this;
         $config->synchronousMode = $synchronousMode;
+        $config->validateModeCombination();
 
         return $config;
     }
@@ -201,6 +202,10 @@ final class SqliteConfig extends SqlConfig
     {
         if ($this->openMode === SqliteOpenMode::ReadOnly && $this->journalMode !== SqliteJournalMode::Automatic) {
             throw new \ValueError('An explicit journal mode cannot be used with a read-only database');
+        }
+
+        if ($this->openMode === SqliteOpenMode::ReadOnly && $this->synchronousMode !== SqliteSynchronousMode::Automatic) {
+            throw new \ValueError('An explicit synchronous mode cannot be used with a read-only database');
         }
     }
 }
