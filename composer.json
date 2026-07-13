@@ -43,10 +43,12 @@
     "scripts": {
         "check": [
             "@cs",
+            "@psalm",
             "@test"
         ],
-        "cs": "php-cs-fixer fix -v --diff --dry-run",
-        "cs-fix": "php-cs-fixer fix -v --diff",
+        "cs": "php-cs-fixer fix --show-progress=none --diff --dry-run",
+        "cs-fix": "php-cs-fixer fix --show-progress=none --diff",
+        "psalm": "@php ./vendor/bin/psalm.phar --no-cache",
         "test": "@php -dzend.assertions=1 -dassert.exception=1 ./vendor/bin/phpunit"
     }
 }
