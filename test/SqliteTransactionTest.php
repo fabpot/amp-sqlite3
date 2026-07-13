@@ -1,0 +1,108 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fabpot\Amp\Sqlite\Test;
+
+use Amp\Sql\SqlTransactionIsolationLevel;
+use Fabpot\Amp\Sqlite\SqliteConfig;
+use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteTransactionMode;
+use PHPUnit\Framework\TestCase;
+use Revolt\EventLoop;
+
+final class SqliteTransactionTest extends TestCase
+{
+    /** @var \Fabpot\Amp\Sqlite\SqliteConnection */
+    private $connection;
+
+    protected function setUp(): void
+    {
+        $this->connection = (new SqliteConnector())->connect(new SqliteConfig(':memory:'));
+        $this->connection->query('CREATE TABLE entries (value TEXT)');
+    }
+
+    protected function tearDown(): void
+    {
+        $this->connection->close();
+    }
+
+    public function testCommitsAndRollsBack(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['committed']);
+        $transaction->commit();
+
+        $transaction = $this->connection->beginTransaction();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['rolled back']);
+        $transaction->rollback();
+
+        self::assertSame([['value' => 'committed']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testUsesConfiguredTransactionMode(): void
+    {
+        $this->connection->setTransactionIsolation(SqliteTransactionMode::Immediate);
+        $transaction = $this->connection->beginTransaction();
+
+        self::assertSame(SqliteTransactionMode::Immediate, $transaction->getIsolation());
+
+        $transaction->rollback();
+    }
+
+    public function testRejectsGenericIsolationLevel(): void
+    {
+        $this->expectException(\TypeError::class);
+
+        $this->connection->setTransactionIsolation(SqlTransactionIsolationLevel::Serializable);
+    }
+
+    public function testNestedCommitAndRollbackUseSavepoints(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['outer']);
+
+        $committed = $transaction->beginTransaction();
+        $committed->execute('INSERT INTO entries VALUES (?)', ['nested commit']);
+        $committed->commit();
+
+        $rolledBack = $transaction->beginTransaction();
+        $rolledBack->execute('INSERT INTO entries VALUES (?)', ['nested rollback']);
+        $rolledBack->rollback();
+
+        $transaction->commit();
+
+        self::assertSame(
+            [['value' => 'outer'], ['value' => 'nested commit']],
+            \iterator_to_array($this->connection->query('SELECT value FROM entries')),
+        );
+    }
+
+    public function testCallbacksRunOnce(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $commits = 0;
+        $rollbacks = 0;
+        $transaction->onCommit(static function () use (&$commits): void {
+            ++$commits;
+        });
+        $transaction->onRollback(static function () use (&$rollbacks): void {
+            ++$rollbacks;
+        });
+
+        $transaction->commit();
+        EventLoop::run();
+
+        self::assertSame(1, $commits);
+        self::assertSame(0, $rollbacks);
+    }
+
+    public function testCloseRollsBack(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['rolled back']);
+        $transaction->close();
+
+        self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+}
