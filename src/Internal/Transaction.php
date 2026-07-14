@@ -110,8 +110,8 @@ final class Transaction implements SqliteTransaction
 
     public function commit(): void
     {
-        $this->assertActive();
         $this->assertNoActiveNestedTransaction();
+        $this->assertActive();
         $this->connection->executeControl($this->savepoint === null ? 'COMMIT' : "RELEASE SAVEPOINT {$this->savepoint}");
         $this->active = false;
         $this->parent?->releaseNested($this);
@@ -129,8 +129,8 @@ final class Transaction implements SqliteTransaction
 
     public function rollback(): void
     {
-        $this->assertActive();
         $this->assertNoActiveNestedTransaction();
+        $this->assertActive();
 
         if ($this->savepoint === null) {
             $this->connection->executeControl('ROLLBACK');
@@ -177,6 +177,7 @@ final class Transaction implements SqliteTransaction
             return;
         }
 
+        $this->activeNested?->close();
         $this->rollback();
     }
 

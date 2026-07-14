@@ -324,6 +324,35 @@ final class SqliteTransactionTest extends TestCase
 
         self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
+
+    public function testCommitRejectsActiveNestedTransactionWithoutWaiting(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $nested = $transaction->beginTransaction();
+
+        try {
+            $transaction->commit();
+            self::fail('Expected the active nested transaction to be rejected');
+        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
+            self::assertSame('The nested transaction is still active', $error->getMessage());
+        }
+
+        $nested->rollback();
+        $transaction->rollback();
+    }
+
+    public function testClosingParentRollsBackActiveNestedTransaction(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $nested = $transaction->beginTransaction();
+        $nested->execute('INSERT INTO entries VALUES (?)', ['nested']);
+
+        $transaction->close();
+
+        self::assertFalse($nested->isActive());
+        self::assertFalse($transaction->isActive());
+        self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
 }
 
 final class RecordingProcessContextFactory implements \Amp\Parallel\Context\ContextFactory
