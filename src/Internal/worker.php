@@ -185,6 +185,34 @@ return static function (Channel $channel): null {
                 return null;
             }
 
+            if ($request['operation'] === 'backup') {
+                $destination = new SQLite3($request['path'], SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE);
+                $destination->enableExceptions(true);
+                try {
+                    if (!$database->backup($destination, $request['database'])) {
+                        throw new RuntimeException('Could not back up the SQLite database');
+                    }
+                } finally {
+                    $destination->close();
+                }
+                $channel->send(['id' => $request['id'], 'value' => null]);
+                continue;
+            }
+
+            if ($request['operation'] === 'restore') {
+                $source = new SQLite3($request['path'], SQLITE3_OPEN_READONLY);
+                $source->enableExceptions(true);
+                try {
+                    if (!$source->backup($database, 'main', $request['database'])) {
+                        throw new RuntimeException('Could not restore the SQLite database');
+                    }
+                } finally {
+                    $source->close();
+                }
+                $channel->send(['id' => $request['id'], 'value' => null]);
+                continue;
+            }
+
             if ($request['operation'] === 'openBlob') {
                 $flags = $request['mode'] === SqliteBlobMode::ReadWrite->name
                     ? SQLITE3_OPEN_READWRITE

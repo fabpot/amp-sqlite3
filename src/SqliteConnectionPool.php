@@ -105,6 +105,28 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
         return $blob;
     }
 
+    public function backup(string $destinationPath, string $database = 'main'): void
+    {
+        $connection = $this->pop();
+
+        try {
+            $connection->backup($destinationPath, $database);
+        } finally {
+            $this->push($connection);
+        }
+    }
+
+    public function restore(string $sourcePath, string $database = 'main'): void
+    {
+        $connection = $this->pop();
+
+        try {
+            $connection->restore($sourcePath, $database);
+        } finally {
+            $this->push($connection);
+        }
+    }
+
     public function extractConnection(): SqliteConnection
     {
         $connection = parent::extractConnection();

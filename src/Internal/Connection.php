@@ -183,6 +183,16 @@ final class Connection implements SqliteConnection
         return $this->openBlobStream($table, $column, $rowId, $database, $mode, false);
     }
 
+    public function backup(string $destinationPath, string $database = 'main'): void
+    {
+        $this->copyDatabase('backup', $destinationPath, $database);
+    }
+
+    public function restore(string $sourcePath, string $database = 'main'): void
+    {
+        $this->copyDatabase('restore', $sourcePath, $database);
+    }
+
     public function queryInTransaction(string $sql): SqliteResult
     {
         return $this->run($sql, [], false, true);
@@ -255,6 +265,23 @@ final class Connection implements SqliteConnection
             $this->request('closeStatement', $sql, ['statement_id' => $statementId]);
         } catch (SqliteConnectionException) {
             // Closing a statement on a dead connection is a no-op.
+        }
+    }
+
+    private function copyDatabase(string $operation, string $path, string $database): void
+    {
+        SqliteConfig::validatePath($path);
+        if ($path === ':memory:') {
+            throw new \ValueError('Backup and restore require a file path');
+        }
+
+        $this->assertOpen();
+        $lock = $this->mutex->acquire();
+
+        try {
+            $this->request($operation, '', ['path' => Path::resolve($path), 'database' => $database]);
+        } finally {
+            $lock->release();
         }
     }
 

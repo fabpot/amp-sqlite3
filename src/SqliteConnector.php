@@ -12,6 +12,7 @@ use Amp\Sql\SqlConfig;
 use Amp\Sql\SqlConnection;
 use Amp\Sql\SqlConnector;
 use Fabpot\Amp\Sqlite\Internal\Connection;
+use Fabpot\Amp\Sqlite\Internal\Path;
 
 /**
  * @implements SqlConnector<SqliteConfig, SqliteConnection>
@@ -39,7 +40,7 @@ final class SqliteConnector implements SqlConnector
         }
         /** @var string $database */
         $database = $config->getDatabase();
-        $path = $this->resolvePath($database);
+        $path = Path::resolve($database);
         $context = null;
 
         try {
@@ -79,22 +80,4 @@ final class SqliteConnector implements SqlConnector
         return new Connection($config, $context);
     }
 
-    private function resolvePath(string $path): string
-    {
-        if ($path === ':memory:' || $this->isAbsolutePath($path)) {
-            return $path;
-        }
-
-        $workingDirectory = \getcwd();
-        if ($workingDirectory === false) {
-            throw new SqliteConnectionException('Could not determine the current working directory');
-        }
-
-        return $workingDirectory . \DIRECTORY_SEPARATOR . $path;
-    }
-
-    private function isAbsolutePath(string $path): bool
-    {
-        return $path[0] === '/' || $path[0] === '\\' || (isset($path[2]) && \ctype_alpha($path[0]) && $path[1] === ':');
-    }
 }

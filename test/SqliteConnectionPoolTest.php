@@ -126,6 +126,22 @@ final class SqliteConnectionPoolTest extends TestCase
         }
     }
 
+    public function testBackupRunsOnPooledConnection(): void
+    {
+        $this->pool->execute('INSERT INTO entries VALUES (?)', ['backed up']);
+        $backupPath = $this->path . '.backup';
+
+        try {
+            $this->pool->backup($backupPath);
+
+            $copy = new \SQLite3($backupPath);
+            self::assertSame(1, $copy->querySingle('SELECT COUNT(*) FROM entries'));
+            $copy->close();
+        } finally {
+            @\unlink($backupPath);
+        }
+    }
+
     public function testPooledResultExposesMetadata(): void
     {
         $insert = $this->pool->execute('INSERT INTO entries VALUES (?)', ['row']);
