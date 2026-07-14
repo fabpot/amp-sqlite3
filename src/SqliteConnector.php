@@ -52,14 +52,14 @@ final class SqliteConnector implements SqlConnector
 
             $context->send([
                 'path' => $path,
-                'openMode' => $config->getOpenMode()->name,
-                'journalMode' => $config->getJournalMode()->value,
-                'synchronousMode' => $config->getSynchronousMode()->value,
-                'foreignKeys' => $config->hasForeignKeys(),
-                'busyTimeout' => $config->getBusyTimeout(),
-                'batchSize' => $config->getBatchSize(),
-                'trustedSchema' => $config->hasTrustedSchema(),
-                'extendedResultCodes' => $config->hasExtendedResultCodes(),
+                'open_mode' => $config->getOpenMode()->name,
+                'journal_mode' => $config->getJournalMode()->value,
+                'synchronous_mode' => $config->getSynchronousMode()->value,
+                'foreign_keys' => $config->hasForeignKeys(),
+                'busy_timeout' => $config->getBusyTimeout(),
+                'batch_size' => $config->getBatchSize(),
+                'trusted_schema' => $config->hasTrustedSchema(),
+                'extended_result_codes' => $config->hasExtendedResultCodes(),
                 'pragmas' => $config->getPragmas(),
             ]);
             $ready = $context->receive($cancellation);

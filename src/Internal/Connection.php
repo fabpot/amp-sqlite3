@@ -177,7 +177,7 @@ final class Connection implements SqliteConnection
         $lock = $this->acquire($transactional);
 
         try {
-            $value = $this->request('executeStatement', $sql, ['statementId' => $statementId, 'params' => $params]);
+            $value = $this->request('executeStatement', $sql, ['statement_id' => $statementId, 'params' => $params]);
         } catch (\Throwable $exception) {
             $lock?->release();
             throw $exception;
@@ -190,8 +190,8 @@ final class Connection implements SqliteConnection
     {
         $this->awaitTransactionResource();
         $value = $this->request('execute', $sql, ['sql' => $sql, 'params' => []]);
-        if ($value['resultId'] !== null) {
-            $this->requestResult('closeResult', $value['resultId'], $sql);
+        if ($value['result_id'] !== null) {
+            $this->requestResult('closeResult', $value['result_id'], $sql);
         }
     }
 
@@ -214,7 +214,7 @@ final class Connection implements SqliteConnection
 
         $lock = $this->acquire($transactional);
         try {
-            $this->request('closeStatement', $sql, ['statementId' => $statementId]);
+            $this->request('closeStatement', $sql, ['statement_id' => $statementId]);
         } finally {
             $lock?->release();
         }
@@ -232,7 +232,7 @@ final class Connection implements SqliteConnection
             $lock?->release();
         }
 
-        return new Statement($this, $value['statementId'], $sql, $transactional);
+        return new Statement($this, $value['statement_id'], $sql, $transactional);
     }
 
     private function run(string $sql, array $params, bool $allowPlaceholders, bool $transactional): SqliteResult
@@ -292,10 +292,10 @@ final class Connection implements SqliteConnection
 
         return new Result(
             $value['rows'],
-            $value['rowCount'],
-            $value['columnCount'],
-            $value['lastInsertId'],
-            $value['resultId'],
+            $value['row_count'],
+            $value['column_count'],
+            $value['last_insert_id'],
+            $value['result_id'],
             $value['exhausted'],
             fn (int $resultId): array => $this->requestResult('fetch', $resultId, $sql),
             fn (int $resultId): mixed => $this->requestResult('closeResult', $resultId, $sql),
@@ -310,7 +310,7 @@ final class Connection implements SqliteConnection
             return null;
         }
 
-        return $this->request($operation, $sql, ['resultId' => $resultId]);
+        return $this->request($operation, $sql, ['result_id' => $resultId]);
     }
 
     private function request(string $operation, string $sql, array $data): mixed
@@ -345,19 +345,19 @@ final class Connection implements SqliteConnection
             throw new SqliteConnectionException('Received an invalid response from the SQLite child process');
         }
 
-        if (isset($response['protocolError'])) {
+        if (isset($response['protocol_error'])) {
             $this->closed = true;
             $this->forceClose();
 
-            throw new SqliteConnectionException($response['protocolError']['message']);
+            throw new SqliteConnectionException($response['protocol_error']['message']);
         }
 
-        if (isset($response['queryError'])) {
+        if (isset($response['query_error'])) {
             throw new SqliteQueryError(
-                $response['queryError']['message'],
+                $response['query_error']['message'],
                 $sql,
-                $response['queryError']['code'],
-                $response['queryError']['extendedCode'],
+                $response['query_error']['code'],
+                $response['query_error']['extended_code'],
             );
         }
     }
