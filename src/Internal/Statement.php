@@ -72,7 +72,7 @@ final class Statement implements SqliteStatement
 
         $this->closed = true;
         $this->activeResult?->close();
-        $this->connection->closeStatement($this->statementId, $this->query, $this->transaction?->isActive() ?? false);
+        $this->connection->closeStatement($this->statementId, $this->query);
         $this->onClose->complete();
     }
 

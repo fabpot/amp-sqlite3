@@ -30,6 +30,7 @@ final class Connection implements SqliteConnection
     use ForbidSerialization;
 
     private readonly LocalMutex $mutex;
+    private readonly LocalMutex $requestMutex;
     private readonly DeferredFuture $onClose;
     private SqliteTransactionMode $transactionMode;
     private bool $closed = false;
@@ -46,6 +47,7 @@ final class Connection implements SqliteConnection
         private readonly Context $context,
     ) {
         $this->mutex = new LocalMutex();
+        $this->requestMutex = new LocalMutex();
         $this->onClose = new DeferredFuture();
         $this->transactionMode = $config->getTransactionMode();
         $this->lastUsedAt = \time();
@@ -128,6 +130,7 @@ final class Connection implements SqliteConnection
         }
 
         $lock = $this->mutex->acquire();
+        $requestLock = $this->requestMutex->acquire();
         try {
             if (!$this->context->isClosed()) {
                 $id = $this->nextRequestId++;
@@ -140,6 +143,7 @@ final class Connection implements SqliteConnection
 
             return;
         } finally {
+            $requestLock->release();
             $lock->release();
         }
 
@@ -232,24 +236,13 @@ final class Connection implements SqliteConnection
         $this->transactionLock = null;
     }
 
-    public function closeStatement(int $statementId, string $sql, bool $transactional): void
+    public function closeStatement(int $statementId, string $sql): void
     {
         if ($this->closed) {
             return;
         }
 
-        if ($transactional && $this->transactionLock !== null) {
-            $this->awaitTransactionResource();
-            $lock = null;
-        } else {
-            $lock = $this->mutex->acquire();
-        }
-
-        try {
-            $this->request('closeStatement', $sql, ['statement_id' => $statementId]);
-        } finally {
-            $lock?->release();
-        }
+        $this->request('closeStatement', $sql, ['statement_id' => $statementId]);
     }
 
     private function openBlobStream(
@@ -418,6 +411,7 @@ final class Connection implements SqliteConnection
 
     private function request(string $operation, string $sql, array $data): mixed
     {
+        $lock = $this->requestMutex->acquire();
         $id = $this->nextRequestId++;
         $this->operationActive = true;
 
@@ -431,6 +425,7 @@ final class Connection implements SqliteConnection
             throw new SqliteConnectionException('The SQLite child process stopped unexpectedly', previous: $exception);
         } finally {
             $this->operationActive = false;
+            $lock->release();
         }
 
         $this->lastUsedAt = \time();

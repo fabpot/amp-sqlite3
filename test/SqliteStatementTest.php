@@ -100,4 +100,15 @@ final class SqliteStatementTest extends TestCase
         self::assertTrue($result->isClosed());
         self::assertSame(['value' => 3], $this->connection->query('SELECT 3 AS value')->fetchRow());
     }
+
+    public function testClosingStatementWhileTransactionIsActive(): void
+    {
+        $statement = $this->connection->prepare('SELECT 1');
+        $transaction = $this->connection->beginTransaction();
+
+        $statement->close();
+
+        self::assertTrue($statement->isClosed());
+        $transaction->commit();
+    }
 }
