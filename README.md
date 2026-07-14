@@ -222,6 +222,58 @@ $bytes = buffer($connection->openBlob('files', 'contents', $rowId));
 
 A BLOB's length is fixed when opened; writing past that length fails. An open BLOB owns its connection until it is closed, so always close it explicitly when abandoning a read or write. Transactions expose the same `openBlob()` method; BLOB writes made inside a transaction roll back with it.
 
+## Custom functions, aggregates, and collations
+
+Register custom SQL callables on the configuration. Because they run in the child process, callbacks must be named functions or public static methods given as strings; closures are not supported:
+
+```php
+final class SqlFunctions
+{
+    public static function slugify(string $value): string { /* ... */ }
+
+    public static function longestStep(?string $context, int $rowNumber, string $value): string { /* ... */ }
+
+    public static function longestFinal(?string $context, int $rowCount): ?string { /* ... */ }
+
+    public static function compareNaturally(string $a, string $b): int { /* ... */ }
+}
+
+$config = (new SqliteConfig($path))
+    ->withFunction('slug', SqlFunctions::class . '::slugify', argCount: 1, deterministic: true)
+    ->withAggregate('longest', SqlFunctions::class . '::longestStep', SqlFunctions::class . '::longestFinal', argCount: 1)
+    ->withCollation('natural', SqlFunctions::class . '::compareNaturally');
+
+$connection = (new SqliteConnector())->connect($config);
+
+$connection->query("SELECT slug(title) FROM posts ORDER BY title COLLATE natural");
+```
+
+Callables are validated when registered and resolved again in the child process through the Composer autoloader. Mark functions `deterministic` when they always return the same output for the same input; SQLite can then use them in indexes and optimize repeated calls.
+
+## Backup and restore
+
+`backup()` copies the entire database to a file using SQLite's online backup API, replacing any existing contents. `restore()` does the reverse. Both work for `:memory:` databases, which makes them the way to persist and reload an in-memory database:
+
+```php
+$connection->backup(__DIR__ . '/snapshot.sqlite');
+
+// Later, or on another connection:
+$connection->restore(__DIR__ . '/snapshot.sqlite');
+```
+
+A backup waits for the connection to be free, so it cannot run while a transaction is open on the same connection. Backing up a file database that other connections are writing to is safe: the backup API retries and produces a consistent copy.
+
+## WAL checkpoints
+
+WAL checkpoints need no dedicated API; run the pragma directly:
+
+```php
+$row = $connection->query('PRAGMA wal_checkpoint(TRUNCATE)')->fetchRow();
+// ['busy' => 0, 'log' => 0, 'checkpointed' => 0]
+```
+
+SQLite checkpoints automatically when the WAL reaches 1000 pages; an explicit `TRUNCATE` checkpoint is useful before backups or to bound WAL file size on write-heavy workloads.
+
 ## Transactions
 
 ```php
