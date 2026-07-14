@@ -37,14 +37,6 @@ final class Transaction implements SqliteTransaction
         $this->onCommit = new DeferredFuture();
         $this->onRollback = new DeferredFuture();
         $this->onClose = new DeferredFuture();
-        $connection->onClose(function (): void {
-            if ($this->active) {
-                $this->active = false;
-                $this->parent?->releaseNested($this);
-                $this->onRollback->complete();
-                $this->onClose->complete();
-            }
-        });
     }
 
     public function __destruct()
@@ -196,6 +188,19 @@ final class Transaction implements SqliteTransaction
     public function onClose(\Closure $onClose): void
     {
         $this->onClose->getFuture()->finally($onClose);
+    }
+
+    public function releaseOnConnectionClose(): void
+    {
+        $nested = $this->activeNested;
+        if ($this->active) {
+            $this->active = false;
+            $this->parent?->releaseNested($this);
+            $this->onRollback->complete();
+            $this->onClose->complete();
+        }
+
+        $nested?->releaseOnConnectionClose();
     }
 
     private function releaseNested(self $transaction): void

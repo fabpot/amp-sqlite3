@@ -279,6 +279,27 @@ final class SqliteTransactionTest extends TestCase
         }
     }
 
+    public function testAbandonedTransactionRollsBackAndReleasesConnection(): void
+    {
+        (function (): void {
+            $transaction = $this->connection->beginTransaction();
+            $transaction->execute('INSERT INTO entries VALUES (?)', ['abandoned']);
+        })();
+
+        self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testFinishedTransactionsAreGarbageCollectable(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $reference = \WeakReference::create($transaction);
+        $transaction->commit();
+        unset($transaction);
+        \gc_collect_cycles();
+
+        self::assertNull($reference->get());
+    }
+
     public function testCloseRollsBack(): void
     {
         $transaction = $this->connection->beginTransaction();

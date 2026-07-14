@@ -38,7 +38,8 @@ final class Connection implements SqliteConnection
     private int $activeLeases = 0;
     private int $lastUsedAt;
     private int $nextRequestId = 1;
-    private ?Transaction $activeTransaction = null;
+    /** @var \WeakReference<Transaction>|null */
+    private ?\WeakReference $activeTransaction = null;
     private ?Lock $transactionLock = null;
     private int $transactionLeases = 0;
     private ?DeferredFuture $transactionIdle = null;
@@ -76,7 +77,7 @@ final class Connection implements SqliteConnection
 
     public function beginTransaction(): SqliteTransaction
     {
-        if ($this->activeTransaction !== null) {
+        if ($this->activeTransaction?->get() !== null) {
             throw new SqliteTransactionError('A transaction is already active');
         }
 
@@ -89,7 +90,10 @@ final class Connection implements SqliteConnection
             throw $exception;
         }
 
-        return $this->activeTransaction = new Transaction($this, $this->transactionMode);
+        $transaction = new Transaction($this, $this->transactionMode);
+        $this->activeTransaction = \WeakReference::create($transaction);
+
+        return $transaction;
     }
 
     public function getConfig(): SqliteConfig
@@ -124,7 +128,7 @@ final class Connection implements SqliteConnection
 
         $this->closed = true;
 
-        if ($this->operationActive || $this->activeLeases > 0 || $this->activeTransaction !== null) {
+        if ($this->operationActive || $this->activeLeases > 0 || $this->transactionLock !== null) {
             $this->forceClose();
 
             return;
@@ -228,7 +232,8 @@ final class Connection implements SqliteConnection
 
     public function releaseTransaction(Transaction $transaction): void
     {
-        if ($this->activeTransaction !== $transaction) {
+        $active = $this->activeTransaction?->get();
+        if ($active !== null && $active !== $transaction) {
             return;
         }
 
@@ -491,6 +496,10 @@ final class Connection implements SqliteConnection
 
     private function forceClose(): void
     {
+        $transaction = $this->activeTransaction?->get();
+        $this->activeTransaction = null;
+        $transaction?->releaseOnConnectionClose();
+
         $this->context->close();
         try {
             $this->context->join();
