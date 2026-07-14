@@ -168,7 +168,9 @@ final class Result implements SqliteResult, \IteratorAggregate
         $this->closed = true;
         $this->rows = [];
         $this->lock?->release();
-        ($this->onRelease ?? static fn () => null)();
+        if ($this->onRelease !== null) {
+            ($this->onRelease)();
+        }
         $this->onClose->complete();
     }
 }

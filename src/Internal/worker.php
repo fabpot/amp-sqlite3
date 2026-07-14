@@ -149,6 +149,24 @@ return static function (Channel $channel): null {
         }
     };
 
+    $prepareSingleStatement = static function (string $sql, string $error) use ($database): SQLite3Stmt {
+        $statement = $database->prepare($sql);
+        if (!$statement) {
+            throw new RuntimeException('SQL must contain an executable statement');
+        }
+        try {
+            $consumedSql = $statement->getSQL();
+        } catch (Error $previous) {
+            throw new RuntimeException('SQL must contain an executable statement', previous: $previous);
+        }
+        if (SqlStatementBoundary::hasSecondStatement(substr($sql, strlen($consumedSql)))) {
+            $statement->close();
+            throw new RuntimeException($error);
+        }
+
+        return $statement;
+    };
+
     while (($request = $channel->receive()) !== null) {
         try {
             if ($request['operation'] === 'close') {
@@ -229,19 +247,7 @@ return static function (Channel $channel): null {
             }
 
             if ($request['operation'] === 'prepare') {
-                $statement = $database->prepare($request['sql']);
-                if (!$statement) {
-                    throw new RuntimeException('SQL must contain an executable statement');
-                }
-                try {
-                    $consumedSql = $statement->getSQL();
-                } catch (Error $error) {
-                    throw new RuntimeException('SQL must contain an executable statement', previous: $error);
-                }
-                if (SqlStatementBoundary::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
-                    $statement->close();
-                    throw new RuntimeException('Only one SQL statement may be prepared at a time');
-                }
+                $statement = $prepareSingleStatement($request['sql'], 'Only one SQL statement may be prepared at a time');
                 $statementId = $nextStatementId++;
                 $knownStatementIds[$statementId] = true;
                 $statements[$statementId] = $statement;
@@ -314,18 +320,7 @@ return static function (Channel $channel): null {
                     $statement->reset();
                 }
             } else {
-                $statement = $database->prepare($request['sql']);
-                if (!$statement) {
-                    throw new RuntimeException('SQL must contain an executable statement');
-                }
-                try {
-                    $consumedSql = $statement->getSQL();
-                } catch (Error $error) {
-                    throw new RuntimeException('SQL must contain an executable statement', previous: $error);
-                }
-                if (SqlStatementBoundary::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
-                    throw new RuntimeException('Only one SQL statement may be executed at a time');
-                }
+                $statement = $prepareSingleStatement($request['sql'], 'Only one SQL statement may be executed at a time');
             }
 
             /** @var bool $bindParameters */
