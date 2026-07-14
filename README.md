@@ -35,6 +35,55 @@ try {
 }
 ```
 
+## Configuration
+
+All options, with their defaults:
+
+```php
+use Fabpot\Amp\Sqlite\SqliteConfig;
+use Fabpot\Amp\Sqlite\SqliteJournalMode;
+use Fabpot\Amp\Sqlite\SqliteOpenMode;
+use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
+use Fabpot\Amp\Sqlite\SqliteTransactionMode;
+
+$config = (new SqliteConfig(__DIR__ . '/database.sqlite'))
+    ->withOpenMode(SqliteOpenMode::ReadWriteCreate)
+    ->withJournalMode(SqliteJournalMode::Automatic)         // WAL for writable files
+    ->withSynchronousMode(SqliteSynchronousMode::Automatic) // NORMAL with WAL
+    ->withForeignKeys(true)
+    ->withBusyTimeout(5_000)                                // milliseconds
+    ->withTrustedSchema(false)
+    ->withBatchSize(100)                                    // rows fetched per IPC round trip
+    ->withTransactionMode(SqliteTransactionMode::Deferred)
+    ->withExtendedResultCodes(true)
+    ->withPragma('cache_size', -8_000);
+```
+
+`SqliteConfig` is immutable; every `with*()` method returns a new instance. Invalid combinations (e.g. an explicit journal mode on a read-only database) are rejected. Pragmas with a dedicated option (`journal_mode`, `synchronous`, `foreign_keys`, `busy_timeout`, `trusted_schema`) cannot be set through `withPragma()`.
+
+Relative paths are resolved against the current working directory of the parent process. SQLite URI filenames (`file:...`) are not supported.
+
+To customize how the child process is started, inject an `Amp\Parallel\Context\ContextFactory` into `SqliteConnector`. The factory must create process contexts.
+
+## Concurrency
+
+A connection serializes its operations: concurrent fibers sharing one connection wait for each other. For parallelism, open multiple connections to the same file database. With WAL, readers never block and see a consistent snapshot while a writer transaction is open:
+
+```php
+$writer = (new SqliteConnector())->connect(new SqliteConfig($path));
+$reader = (new SqliteConnector())->connect(new SqliteConfig($path));
+
+$transaction = $writer->beginTransaction();
+$transaction->execute('INSERT INTO events VALUES (?)', ['pending']);
+
+// Runs immediately; sees the pre-transaction snapshot.
+$reader->query('SELECT COUNT(*) FROM events');
+
+$transaction->commit();
+```
+
+SQLite allows one writer per database at a time; concurrent writers wait up to the configured busy timeout. There is no built-in connection pool.
+
 ## Queries
 
 Use `query()` for SQL without parameters and `execute()` for parameterized SQL:
@@ -52,6 +101,8 @@ echo $result->getLastInsertId();
 
 The driver accepts SQLite's native anonymous (`?`), numbered (`?NNN`), and named (`:name`, `@name`, and `$name`) parameters, including mixed forms. Integer array keys are zero-based; string keys are passed to `SQLite3Stmt::bindValue()` unchanged. Parameters that PHP cannot bind by name can be bound by position.
 
+Parameter values must be `null`, `bool`, `int`, `float`, `string`, or `SqliteBlob`; anything else throws a `TypeError`. Booleans are bound as integers.
+
 The driver accepts one SQL statement per operation. Empty SQL and multiple statements are rejected.
 
 ## Results
@@ -64,6 +115,16 @@ $result = $connection->query('SELECT id, name FROM users ORDER BY id');
 foreach ($result as $row) {
     echo $row['name'], "\n";
 }
+```
+
+Row values keep their SQLite types: `null`, `int`, `float`, `string`, or `SqliteBlob`.
+
+```php
+$insert = $connection->execute('INSERT INTO users (name) VALUES (?)', ['Alice']);
+
+$insert->getRowCount();     // changed rows, including trigger changes; 0 for DDL
+$insert->getLastInsertId(); // last inserted row ID
+$insert->getColumnCount();  // null for commands, column count for row-producing SQL
 ```
 
 An active row-producing result owns its connection until it is exhausted or closed. Close a result explicitly when abandoning unread rows:
@@ -124,7 +185,22 @@ try {
 }
 ```
 
-`SqliteBlobStream` implements AMPHP's `ReadableStream` and `WritableStream`. Its length is fixed when opened; writing past that length fails. An open BLOB owns its connection until it is closed, so always close it explicitly when abandoning a read or write.
+Reading is incremental too; `SqliteBlobStream` implements AMPHP's `ReadableStream` and `WritableStream`:
+
+```php
+use function Amp\ByteStream\buffer;
+
+$blob = $connection->openBlob('files', 'contents', $rowId);
+
+foreach ($blob as $chunk) {
+    // Process 8 KiB chunks.
+}
+
+// Or read everything at once:
+$bytes = buffer($connection->openBlob('files', 'contents', $rowId));
+```
+
+A BLOB's length is fixed when opened; writing past that length fails. An open BLOB owns its connection until it is closed, so always close it explicitly when abandoning a read or write. Transactions expose the same `openBlob()` method; BLOB writes made inside a transaction roll back with it.
 
 ## Transactions
 
@@ -140,4 +216,40 @@ try {
 }
 ```
 
-Nested transactions use SQLite savepoints. Configure the top-level mode with `SqliteTransactionMode::Deferred`, `Immediate`, or `Exclusive`.
+A transaction owns its connection until committed or rolled back. An abandoned transaction is rolled back automatically. Configure the top-level mode with `SqliteTransactionMode::Deferred`, `Immediate`, or `Exclusive`.
+
+Nested transactions use SQLite savepoints:
+
+```php
+$transaction = $connection->beginTransaction();
+$transaction->execute('INSERT INTO users (name) VALUES (?)', ['kept']);
+
+$nested = $transaction->beginTransaction();
+$nested->execute('INSERT INTO users (name) VALUES (?)', ['discarded']);
+$nested->rollback();
+
+$transaction->commit();
+```
+
+Register lifecycle callbacks with `onCommit()` and `onRollback()`. Callbacks on a nested transaction run once the outcome is final, i.e. when the top-level transaction commits or rolls back.
+
+## Errors
+
+```php
+use Fabpot\Amp\Sqlite\SqliteQueryError;
+
+try {
+    $connection->execute('INSERT INTO users (id, name) VALUES (1, ?)', ['Dup']);
+} catch (SqliteQueryError $error) {
+    $error->getResultCode();         // 19 (SQLITE_CONSTRAINT)
+    $error->getExtendedResultCode(); // 1555 (SQLITE_CONSTRAINT_PRIMARYKEY)
+    $error->getQuery();              // the failed SQL
+}
+```
+
+- `SqliteQueryError`: SQL preparation and execution failures, with SQLite result codes.
+- `SqliteConnectionException`: startup, IPC, and unexpected child-process failures.
+- `SqliteTransactionError`: operations on finished transactions.
+- All extend the corresponding `Amp\Sql` exceptions.
+
+Exception messages and traces never contain bound parameter values.
