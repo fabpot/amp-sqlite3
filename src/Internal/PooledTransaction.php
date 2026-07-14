@@ -13,63 +13,103 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Internal;
 
-use Amp\Sql\Common\SqlPooledTransaction;
-use Amp\Sql\SqlResult;
-use Amp\Sql\SqlStatement;
-use Amp\Sql\SqlTransaction;
+use Amp\ForbidCloning;
+use Amp\ForbidSerialization;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteBlobStream;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
+use Revolt\EventLoop;
 
-/**
- * @extends SqlPooledTransaction<SqliteResult, SqliteStatement, SqliteTransaction>
- */
-final class PooledTransaction extends SqlPooledTransaction implements SqliteTransaction
+final class PooledTransaction implements SqliteTransaction
 {
-    private readonly SqliteTransaction $transaction;
+    use ForbidCloning;
+    use ForbidSerialization;
+
+    /** @var object{count: int} */
+    private readonly object $references;
 
     /**
      * @param \Closure():void $release
      */
-    public function __construct(SqliteTransaction $transaction, \Closure $release)
-    {
-        parent::__construct($transaction, $release);
-        $this->transaction = $transaction;
+    public function __construct(
+        private readonly SqliteTransaction $transaction,
+        \Closure $release,
+    ) {
+        $this->references = $references = new class {
+            public int $count = 1;
+        };
+        $this->release = static function () use ($references, $release): void {
+            if (--$references->count === 0) {
+                $release();
+            }
+        };
+
+        $this->transaction->onClose($this->release);
+        if (!$this->transaction->isActive()) {
+            $this->close();
+        }
     }
+
+    /** @var \Closure():void */
+    private readonly \Closure $release;
 
     public function query(string $sql): SqliteResult
     {
-        $result = parent::query($sql);
-        \assert($result instanceof SqliteResult);
+        ++$this->references->count;
 
-        return $result;
+        try {
+            $result = $this->transaction->query($sql);
+        } catch (\Throwable $exception) {
+            EventLoop::queue($this->release);
+            throw $exception;
+        }
+
+        return new PooledResult($result, $this->release);
     }
 
     public function prepare(string $sql): SqliteStatement
     {
-        $statement = parent::prepare($sql);
-        \assert($statement instanceof SqliteStatement);
+        ++$this->references->count;
 
-        return $statement;
+        try {
+            $statement = $this->transaction->prepare($sql);
+        } catch (\Throwable $exception) {
+            EventLoop::queue($this->release);
+            throw $exception;
+        }
+
+        return new PooledStatement($statement, $this->release);
     }
 
     public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult
     {
-        $result = parent::execute($sql, $params);
-        \assert($result instanceof SqliteResult);
+        ++$this->references->count;
 
-        return $result;
+        try {
+            $result = $this->transaction->execute($sql, $params);
+        } catch (\Throwable $exception) {
+            EventLoop::queue($this->release);
+            throw $exception;
+        }
+
+        return new PooledResult($result, $this->release);
     }
 
     public function beginTransaction(): SqliteTransaction
     {
-        $transaction = parent::beginTransaction();
-        \assert($transaction instanceof SqliteTransaction);
+        ++$this->references->count;
 
-        return $transaction;
+        try {
+            $transaction = $this->transaction->beginTransaction();
+        } catch (\Throwable $exception) {
+            EventLoop::queue($this->release);
+            throw $exception;
+        }
+
+        return new self($transaction, $this->release);
     }
 
     public function openBlob(
@@ -90,24 +130,53 @@ final class PooledTransaction extends SqlPooledTransaction implements SqliteTran
         return $isolation;
     }
 
-    protected function createStatement(SqlStatement $statement, \Closure $release): SqliteStatement
+    public function isActive(): bool
     {
-        \assert($statement instanceof SqliteStatement);
-
-        return new PooledStatement($statement, $release);
+        return $this->transaction->isActive();
     }
 
-    protected function createResult(SqlResult $result, \Closure $release): SqliteResult
+    public function commit(): void
     {
-        \assert($result instanceof SqliteResult);
-
-        return new PooledResult($result, $release);
+        $this->transaction->commit();
     }
 
-    protected function createTransaction(SqlTransaction $transaction, \Closure $release): SqliteTransaction
+    public function rollback(): void
     {
-        \assert($transaction instanceof SqliteTransaction);
+        $this->transaction->rollback();
+    }
 
-        return new self($transaction, $release);
+    public function onCommit(\Closure $onCommit): void
+    {
+        $this->transaction->onCommit($onCommit);
+    }
+
+    public function onRollback(\Closure $onRollback): void
+    {
+        $this->transaction->onRollback($onRollback);
+    }
+
+    public function getSavepointIdentifier(): ?string
+    {
+        return $this->transaction->getSavepointIdentifier();
+    }
+
+    public function getLastUsedAt(): int
+    {
+        return $this->transaction->getLastUsedAt();
+    }
+
+    public function close(): void
+    {
+        $this->transaction->close();
+    }
+
+    public function isClosed(): bool
+    {
+        return $this->transaction->isClosed();
+    }
+
+    public function onClose(\Closure $onClose): void
+    {
+        $this->transaction->onClose($onClose);
     }
 }

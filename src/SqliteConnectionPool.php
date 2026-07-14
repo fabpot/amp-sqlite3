@@ -71,10 +71,16 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
 
     public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult
     {
-        $result = parent::execute($sql, $params);
-        \assert($result instanceof SqliteResult);
+        $connection = $this->pop();
 
-        return $result;
+        try {
+            $result = $connection->execute($sql, $params);
+        } catch (\Throwable $exception) {
+            $this->push($connection);
+            throw $exception;
+        }
+
+        return $this->createResult($result, fn () => $this->push($connection));
     }
 
     public function prepare(string $sql): SqliteStatement

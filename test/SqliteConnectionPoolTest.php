@@ -15,6 +15,7 @@ namespace Fabpot\Amp\Sqlite\Test;
 
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnectionPool;
+use Fabpot\Amp\Sqlite\SqliteQueryError;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 use function Amp\delay;
@@ -64,14 +65,64 @@ final class SqliteConnectionPoolTest extends TestCase
         try {
             $command = $pool->execute('INSERT INTO entries VALUES (?)', ['first']);
             $result = async(fn () => $pool->execute('INSERT INTO entries VALUES (?)', ['second']));
-            delay(0.01);
 
             self::assertTrue($command->isClosed());
-            self::assertTrue($result->isComplete());
+            self::assertSame(1, $pool->getIdleConnectionCount());
             $result->await();
             self::assertSame(2, $pool->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
         } finally {
             $pool->close();
+        }
+    }
+
+    public function testExecuteRedactsParameterValuesFromExceptionTraces(): void
+    {
+        try {
+            $this->pool->execute('SELECT ?, ?', ['s3cr3t-password']);
+            self::fail('Expected the parameter count mismatch to fail');
+        } catch (SqliteQueryError $error) {
+            self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
+        }
+    }
+
+    public function testStatementRedactsParameterValuesFromExceptionTraces(): void
+    {
+        $statement = $this->pool->prepare('SELECT ?, ?');
+
+        try {
+            $statement->execute(['s3cr3t-password']);
+            self::fail('Expected the parameter count mismatch to fail');
+        } catch (SqliteQueryError $error) {
+            self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
+        }
+    }
+
+    public function testTransactionRedactsParameterValuesFromExceptionTraces(): void
+    {
+        $transaction = $this->pool->beginTransaction();
+
+        try {
+            $transaction->execute('SELECT ?, ?', ['s3cr3t-password']);
+            self::fail('Expected the parameter count mismatch to fail');
+        } catch (SqliteQueryError $error) {
+            self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
+        } finally {
+            $transaction->rollback();
+        }
+    }
+
+    public function testTransactionStatementRedactsParameterValuesFromExceptionTraces(): void
+    {
+        $transaction = $this->pool->beginTransaction();
+        $statement = $transaction->prepare('SELECT ?, ?');
+
+        try {
+            $statement->execute(['s3cr3t-password']);
+            self::fail('Expected the parameter count mismatch to fail');
+        } catch (SqliteQueryError $error) {
+            self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
+        } finally {
+            $transaction->rollback();
         }
     }
 
@@ -135,7 +186,7 @@ final class SqliteConnectionPoolTest extends TestCase
         $blob = $this->pool->openBlob('entries', 'value', $rowId);
         $idleBefore = $this->pool->getIdleConnectionCount();
         $blob->close();
-        delay(0.01);
+        delay(0);
 
         self::assertSame($idleBefore + 1, $this->pool->getIdleConnectionCount());
     }

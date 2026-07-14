@@ -13,36 +13,95 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Internal;
 
-use Amp\Sql\Common\SqlPooledStatement;
-use Amp\Sql\SqlResult;
+use Amp\ForbidCloning;
+use Amp\ForbidSerialization;
+use Amp\Sql\SqlException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
+use Revolt\EventLoop;
 
-/**
- * @extends SqlPooledStatement<SqliteResult, SqliteStatement>
- */
-final class PooledStatement extends SqlPooledStatement implements SqliteStatement
+final class PooledStatement implements SqliteStatement
 {
+    use ForbidCloning;
+    use ForbidSerialization;
+
+    /** @var null|\Closure():void */
+    private ?\Closure $release;
+
+    /** @var object{count: int} */
+    private readonly object $references;
+
     /**
      * @param \Closure():void $release
+     * @param (\Closure():void)|null $awaitBusyResource
      */
-    public function __construct(SqliteStatement $statement, \Closure $release, ?\Closure $awaitBusyResource = null)
-    {
-        parent::__construct($statement, $release, $awaitBusyResource);
+    public function __construct(
+        private readonly SqliteStatement $statement,
+        \Closure $release,
+        private readonly ?\Closure $awaitBusyResource = null,
+    ) {
+        $this->references = $references = new class {
+            public int $count = 1;
+        };
+        $this->release = static function () use ($references, $release): void {
+            if (--$references->count === 0) {
+                $release();
+            }
+        };
     }
 
-    public function execute(array $params = []): SqliteResult
+    public function __destruct()
     {
-        $result = parent::execute($params);
-        \assert($result instanceof SqliteResult);
-
-        return $result;
+        $this->dispose();
     }
 
-    protected function createResult(SqlResult $result, \Closure $release): SqliteResult
+    public function execute(#[\SensitiveParameter] array $params = []): SqliteResult
     {
-        \assert($result instanceof SqliteResult);
+        if ($this->release === null) {
+            throw new SqlException('The statement has been closed');
+        }
 
-        return new PooledResult($result, $release);
+        if ($this->awaitBusyResource !== null) {
+            ($this->awaitBusyResource)();
+        }
+
+        $result = $this->statement->execute($params);
+        ++$this->references->count;
+
+        return new PooledResult($result, $this->release);
+    }
+
+    public function getQuery(): string
+    {
+        return $this->statement->getQuery();
+    }
+
+    public function getLastUsedAt(): int
+    {
+        return $this->statement->getLastUsedAt();
+    }
+
+    public function close(): void
+    {
+        $this->dispose();
+        $this->statement->close();
+    }
+
+    public function isClosed(): bool
+    {
+        return $this->statement->isClosed();
+    }
+
+    public function onClose(\Closure $onClose): void
+    {
+        $this->statement->onClose($onClose);
+    }
+
+    private function dispose(): void
+    {
+        if ($this->release !== null) {
+            EventLoop::queue($this->release);
+            $this->release = null;
+        }
     }
 }
