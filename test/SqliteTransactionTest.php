@@ -11,6 +11,7 @@ use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
 use Revolt\EventLoop;
 use function Amp\async;
+use function Amp\delay;
 
 final class SqliteTransactionTest extends TestCase
 {
@@ -128,6 +129,45 @@ final class SqliteTransactionTest extends TestCase
         $transaction->commit();
 
         self::assertSame([['value' => 'after result']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testConcurrentTransactionalQueriesSerializeWithoutLosingWakeups(): void
+    {
+        $this->connection->execute('INSERT INTO entries VALUES (?), (?), (?)', ['a', 'b', 'c']);
+        $transaction = $this->connection->beginTransaction();
+
+        $first = async(fn () => \iterator_to_array($transaction->query('SELECT value FROM entries ORDER BY value')));
+        $second = async(fn () => \iterator_to_array($transaction->query('SELECT value FROM entries ORDER BY value DESC')));
+        $third = async(fn () => $transaction->execute('INSERT INTO entries VALUES (?)', ['late']));
+
+        self::assertCount(3, $first->await());
+        self::assertCount(3, $second->await());
+        $third->await();
+        $transaction->commit();
+
+        self::assertSame(['c' => 4], $this->connection->query('SELECT COUNT(*) AS c FROM entries')->fetchRow());
+    }
+
+    public function testCommitWaitsForResultOpenedConcurrentlyWithAnotherResult(): void
+    {
+        $this->connection->execute('INSERT INTO entries VALUES (?), (?)', ['a', 'b']);
+        $transaction = $this->connection->beginTransaction();
+
+        $first = async(fn () => $transaction->query('SELECT value FROM entries ORDER BY value'));
+        $second = async(fn () => $transaction->query('SELECT value FROM entries ORDER BY value DESC'));
+
+        $firstResult = $first->await();
+        $firstResult->close();
+        $secondResult = $second->await();
+
+        $commit = async(fn () => $transaction->commit());
+        delay(0.05);
+        self::assertFalse($commit->isComplete());
+
+        $secondResult->close();
+        $commit->await();
+
+        self::assertTrue($transaction->isClosed());
     }
 
     public function testNestedCommitCallbackWaitsForTopLevelCommit(): void

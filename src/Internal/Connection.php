@@ -40,7 +40,8 @@ final class Connection implements SqliteConnection
     private int $nextRequestId = 1;
     private ?Transaction $activeTransaction = null;
     private ?Lock $transactionLock = null;
-    private ?DeferredFuture $transactionBusy = null;
+    private int $transactionLeases = 0;
+    private ?DeferredFuture $transactionIdle = null;
 
     public function __construct(
         private readonly SqliteConfig $config,
@@ -205,7 +206,7 @@ final class Connection implements SqliteConnection
         try {
             $value = $this->request('executeStatement', $sql, ['statement_id' => $statementId, 'params' => $params]);
         } catch (\Throwable $exception) {
-            $lock?->release();
+            $this->releaseAcquired($lock, $transactional);
             throw $exception;
         }
 
@@ -265,14 +266,11 @@ final class Connection implements SqliteConnection
                 'mode' => $mode->name,
             ]);
         } catch (\Throwable $exception) {
-            $lock?->release();
+            $this->releaseAcquired($lock, $transactional);
             throw $exception;
         }
 
         ++$this->activeLeases;
-        if ($transactional) {
-            $this->transactionBusy = new DeferredFuture();
-        }
 
         $released = false;
         $release = function () use (&$released, $transactional, $lock): void {
@@ -284,8 +282,7 @@ final class Connection implements SqliteConnection
             --$this->activeLeases;
             $lock?->release();
             if ($transactional) {
-                $this->transactionBusy?->complete();
-                $this->transactionBusy = null;
+                $this->releaseTransactionLease();
             }
         };
         $blobId = $value['blob_id'];
@@ -321,7 +318,7 @@ final class Connection implements SqliteConnection
         try {
             $value = $this->request('prepare', $sql, ['sql' => $sql]);
         } finally {
-            $lock?->release();
+            $this->releaseAcquired($lock, $transaction !== null);
         }
 
         return new Statement($this, $value['statement_id'], $sql, $transaction);
@@ -340,7 +337,7 @@ final class Connection implements SqliteConnection
                 'bind_parameters' => $bindParameters,
             ]);
         } catch (\Throwable $exception) {
-            $lock?->release();
+            $this->releaseAcquired($lock, $transactional);
             throw $exception;
         }
 
@@ -358,18 +355,29 @@ final class Connection implements SqliteConnection
         }
 
         $this->awaitTransactionResource();
+        ++$this->transactionLeases;
 
         return null;
+    }
+
+    private function releaseAcquired(?Lock $lock, bool $transactional): void
+    {
+        $lock?->release();
+        if ($transactional) {
+            $this->releaseTransactionLease();
+        }
     }
 
     private function createResult(array $value, string $sql, ?Lock $lock, bool $transactional): SqliteResult
     {
         $onRelease = null;
-        if (!$value['exhausted']) {
-            ++$this->activeLeases;
+        if ($value['exhausted']) {
+            $lock?->release();
             if ($transactional) {
-                $this->transactionBusy = new DeferredFuture();
+                $this->releaseTransactionLease();
             }
+        } else {
+            ++$this->activeLeases;
 
             $released = false;
             $onRelease = function () use (&$released, $transactional): void {
@@ -380,8 +388,7 @@ final class Connection implements SqliteConnection
                 $released = true;
                 --$this->activeLeases;
                 if ($transactional) {
-                    $this->transactionBusy?->complete();
-                    $this->transactionBusy = null;
+                    $this->releaseTransactionLease();
                 }
             };
         }
@@ -462,8 +469,16 @@ final class Connection implements SqliteConnection
 
     private function awaitTransactionResource(): void
     {
-        while ($this->transactionBusy !== null) {
-            $this->transactionBusy->getFuture()->await();
+        while ($this->transactionLeases > 0) {
+            ($this->transactionIdle ??= new DeferredFuture())->getFuture()->await();
+        }
+    }
+
+    private function releaseTransactionLease(): void
+    {
+        if (--$this->transactionLeases === 0) {
+            $this->transactionIdle?->complete();
+            $this->transactionIdle = null;
         }
     }
 
