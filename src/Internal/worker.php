@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Amp\Sync\Channel;
+use Fabpot\Amp\Sqlite\Internal\ProtocolError;
 use Fabpot\Amp\Sqlite\Internal\SqlScanner;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
@@ -86,8 +87,12 @@ return static function (Channel $channel): null {
 
     $nextResultId = 1;
     $nextStatementId = 1;
+    /** @var array<int, true> $knownStatementIds */
+    $knownStatementIds = [];
     /** @var array<int, SQLite3Stmt> $statements */
     $statements = [];
+    /** @var array<int, true> $knownResultIds */
+    $knownResultIds = [];
     /** @var array<int, array{result: SQLite3Result, statement: SQLite3Stmt, statementId: int|null, pending: array<string, mixed>|null}> $results */
     $results = [];
 
@@ -161,12 +166,17 @@ return static function (Channel $channel): null {
                     throw new RuntimeException('Only one SQL statement may be prepared at a time');
                 }
                 $statementId = $nextStatementId++;
+                $knownStatementIds[$statementId] = true;
                 $statements[$statementId] = $statement;
                 $channel->send(['id' => $request['id'], 'value' => ['statementId' => $statementId]]);
                 continue;
             }
 
             if ($request['operation'] === 'closeStatement') {
+                if (!isset($knownStatementIds[$request['statementId']])) {
+                    throw new ProtocolError("Unknown statement ID '{$request['statementId']}'");
+                }
+
                 if (isset($statements[$request['statementId']])) {
                     foreach ($results as $resultId => $resource) {
                         if ($resource['statementId'] === $request['statementId']) {
@@ -183,7 +193,7 @@ return static function (Channel $channel): null {
 
             if ($request['operation'] === 'fetch') {
                 if (!isset($results[$request['resultId']])) {
-                    throw new RuntimeException("Unknown result ID '{$request['resultId']}'");
+                    throw new ProtocolError("Unknown result ID '{$request['resultId']}'");
                 }
 
                 $batch = $fetchBatch($results[$request['resultId']]);
@@ -196,6 +206,10 @@ return static function (Channel $channel): null {
             }
 
             if ($request['operation'] === 'closeResult') {
+                if (!isset($knownResultIds[$request['resultId']])) {
+                    throw new ProtocolError("Unknown result ID '{$request['resultId']}'");
+                }
+
                 if (isset($results[$request['resultId']])) {
                     $closeResult($results[$request['resultId']]);
                     unset($results[$request['resultId']]);
@@ -205,7 +219,7 @@ return static function (Channel $channel): null {
             }
 
             if ($request['operation'] !== 'execute' && $request['operation'] !== 'executeStatement') {
-                throw new RuntimeException("Unknown operation '{$request['operation']}'");
+                throw new ProtocolError("Unknown operation '{$request['operation']}'");
             }
 
             /** @var int $before */
@@ -213,7 +227,7 @@ return static function (Channel $channel): null {
             $statementId = $request['statementId'] ?? null;
             if ($statementId !== null) {
                 if (!isset($statements[$statementId])) {
-                    throw new RuntimeException("Unknown statement ID '{$statementId}'");
+                    throw new ProtocolError("Unknown statement ID '{$statementId}'");
                 }
                 $statement = $statements[$statementId];
                 $statement->reset();
@@ -253,6 +267,7 @@ return static function (Channel $channel): null {
 
             if ($columns > 0) {
                 $resultId = $nextResultId++;
+                $knownResultIds[$resultId] = true;
                 $results[$resultId] = ['result' => $nativeResult, 'statement' => $statement, 'statementId' => $statementId, 'pending' => null];
                 $batch = $fetchBatch($results[$resultId]);
                 $value['resultId'] = $resultId;
@@ -270,10 +285,17 @@ return static function (Channel $channel): null {
             }
 
             $channel->send(['id' => $request['id'], 'value' => $value]);
+        } catch (ProtocolError $error) {
+            $channel->send([
+                'id' => $request['id'],
+                'protocolError' => ['message' => $error->getMessage()],
+            ]);
+
+            break;
         } catch (Throwable $exception) {
             $channel->send([
                 'id' => $request['id'],
-                'error' => [
+                'queryError' => [
                     'message' => $exception->getMessage(),
                     'code' => $database->lastErrorCode(),
                     'extendedCode' => $database->lastExtendedErrorCode(),

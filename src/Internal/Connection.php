@@ -345,12 +345,19 @@ final class Connection implements SqliteConnection
             throw new SqliteConnectionException('Received an invalid response from the SQLite child process');
         }
 
-        if (isset($response['error'])) {
+        if (isset($response['protocolError'])) {
+            $this->closed = true;
+            $this->forceClose();
+
+            throw new SqliteConnectionException($response['protocolError']['message']);
+        }
+
+        if (isset($response['queryError'])) {
             throw new SqliteQueryError(
-                $response['error']['message'],
+                $response['queryError']['message'],
                 $sql,
-                $response['error']['code'],
-                $response['error']['extendedCode'],
+                $response['queryError']['code'],
+                $response['queryError']['extendedCode'],
             );
         }
     }

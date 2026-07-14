@@ -11,6 +11,7 @@ use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
 use PHPUnit\Framework\TestCase;
+use Revolt\EventLoop;
 
 final class SqliteConnectionTest extends TestCase
 {
@@ -138,6 +139,28 @@ final class SqliteConnectionTest extends TestCase
         }
     }
 
+    public function testProtocolErrorClosesConnection(): void
+    {
+        $factory = new ProtocolErrorProcessContextFactory();
+        $connection = (new SqliteConnector($factory))->connect(new SqliteConfig(':memory:'));
+        $closed = 0;
+        $connection->onClose(static function () use (&$closed): void {
+            ++$closed;
+        });
+        $factory->context->send(['id' => 1, 'operation' => 'unknown']);
+
+        try {
+            $connection->query('SELECT 1');
+            self::fail('Expected the protocol error to fail the connection');
+        } catch (SqliteConnectionException $exception) {
+            self::assertSame("Unknown operation 'unknown'", $exception->getMessage());
+        }
+        EventLoop::run();
+
+        self::assertTrue($connection->isClosed());
+        self::assertSame(1, $closed);
+    }
+
     public function testUsesExplicitJournalMode(): void
     {
         $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
@@ -150,5 +173,15 @@ final class SqliteConnectionTest extends TestCase
             $connection->close();
             @\unlink($path);
         }
+    }
+}
+
+final class ProtocolErrorProcessContextFactory implements \Amp\Parallel\Context\ContextFactory
+{
+    public \Amp\Parallel\Context\ProcessContext $context;
+
+    public function start(string|array $script, ?\Amp\Cancellation $cancellation = null): \Amp\Parallel\Context\Context
+    {
+        return $this->context = (new \Amp\Parallel\Context\ProcessContextFactory())->start($script, $cancellation);
     }
 }
