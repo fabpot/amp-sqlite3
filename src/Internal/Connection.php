@@ -247,11 +247,15 @@ final class Connection implements SqliteConnection
 
     public function closeStatement(int $statementId, string $sql): void
     {
-        if ($this->closed) {
+        if ($this->closed || $this->context->isClosed()) {
             return;
         }
 
-        $this->request('closeStatement', $sql, ['statement_id' => $statementId]);
+        try {
+            $this->request('closeStatement', $sql, ['statement_id' => $statementId]);
+        } catch (SqliteConnectionException) {
+            // Closing a statement on a dead connection is a no-op.
+        }
     }
 
     private function openBlobStream(
@@ -308,9 +312,11 @@ final class Connection implements SqliteConnection
             ]),
             function () use ($blobId, $release): void {
                 try {
-                    if (!$this->closed) {
+                    if (!$this->closed && !$this->context->isClosed()) {
                         $this->request('closeBlob', '', ['blob_id' => $blobId]);
                     }
+                } catch (SqliteConnectionException) {
+                    // Closing a BLOB on a dead connection is a no-op.
                 } finally {
                     $release();
                 }
@@ -418,8 +424,17 @@ final class Connection implements SqliteConnection
 
     private function requestResult(string $operation, int $resultId, string $sql): mixed
     {
-        if ($this->closed && $operation === 'closeResult') {
-            return null;
+        if ($operation === 'closeResult') {
+            if ($this->closed || $this->context->isClosed()) {
+                return null;
+            }
+
+            try {
+                return $this->request($operation, $sql, ['result_id' => $resultId]);
+            } catch (SqliteConnectionException) {
+                // Closing a result on a dead connection is a no-op.
+                return null;
+            }
         }
 
         return $this->request($operation, $sql, ['result_id' => $resultId]);
