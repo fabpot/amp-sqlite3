@@ -6,6 +6,7 @@ use Amp\Sync\Channel;
 use Fabpot\Amp\Sqlite\Internal\ProtocolError;
 use Fabpot\Amp\Sqlite\Internal\SqlStatementBoundary;
 use Fabpot\Amp\Sqlite\SqliteBlob;
+use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
 use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
@@ -85,8 +86,13 @@ return static function (Channel $channel): null {
 
     $channel->send(['ready' => true]);
 
+    $nextBlobId = 1;
     $nextResultId = 1;
     $nextStatementId = 1;
+    /** @var array<int, true> $knownBlobIds */
+    $knownBlobIds = [];
+    /** @var array<int, resource> $blobs */
+    $blobs = [];
     /** @var array<int, true> $knownStatementIds */
     $knownStatementIds = [];
     /** @var array<int, SQLite3Stmt> $statements */
@@ -146,6 +152,9 @@ return static function (Channel $channel): null {
     while (($request = $channel->receive()) !== null) {
         try {
             if ($request['operation'] === 'close') {
+                foreach ($blobs as $blob) {
+                    fclose($blob);
+                }
                 foreach ($results as $resource) {
                     $closeResult($resource);
                 }
@@ -156,6 +165,67 @@ return static function (Channel $channel): null {
                 $channel->send(['id' => $request['id'], 'value' => null]);
 
                 return null;
+            }
+
+            if ($request['operation'] === 'openBlob') {
+                $flags = $request['mode'] === SqliteBlobMode::ReadWrite->name
+                    ? SQLITE3_OPEN_READWRITE
+                    : SQLITE3_OPEN_READONLY;
+                $blob = $database->openBlob(
+                    $request['table'],
+                    $request['column'],
+                    $request['row_id'],
+                    $request['database'],
+                    $flags,
+                );
+                $blobId = $nextBlobId++;
+                $knownBlobIds[$blobId] = true;
+                $blobs[$blobId] = $blob;
+                $stat = fstat($blob);
+                if ($stat === false) {
+                    throw new RuntimeException('Could not determine SQLite BLOB length');
+                }
+                $channel->send([
+                    'id' => $request['id'],
+                    'value' => ['blob_id' => $blobId, 'length' => $stat['size']],
+                ]);
+                continue;
+            }
+
+            if ($request['operation'] === 'readBlob') {
+                if (!isset($blobs[$request['blob_id']])) {
+                    throw new ProtocolError("Unknown BLOB ID '{$request['blob_id']}'");
+                }
+                $bytes = fread($blobs[$request['blob_id']], $request['length']);
+                if ($bytes === false) {
+                    throw new RuntimeException('Could not read from SQLite BLOB');
+                }
+                $channel->send(['id' => $request['id'], 'value' => ['bytes' => $bytes]]);
+                continue;
+            }
+
+            if ($request['operation'] === 'writeBlob') {
+                if (!isset($blobs[$request['blob_id']])) {
+                    throw new ProtocolError("Unknown BLOB ID '{$request['blob_id']}'");
+                }
+                $written = fwrite($blobs[$request['blob_id']], $request['bytes']);
+                if ($written !== strlen($request['bytes'])) {
+                    throw new RuntimeException('Could not write to SQLite BLOB');
+                }
+                $channel->send(['id' => $request['id'], 'value' => null]);
+                continue;
+            }
+
+            if ($request['operation'] === 'closeBlob') {
+                if (!isset($knownBlobIds[$request['blob_id']])) {
+                    throw new ProtocolError("Unknown BLOB ID '{$request['blob_id']}'");
+                }
+                if (isset($blobs[$request['blob_id']])) {
+                    fclose($blobs[$request['blob_id']]);
+                    unset($blobs[$request['blob_id']]);
+                }
+                $channel->send(['id' => $request['id'], 'value' => null]);
+                continue;
             }
 
             if ($request['operation'] === 'prepare') {
@@ -334,6 +404,9 @@ return static function (Channel $channel): null {
         }
     }
 
+    foreach ($blobs as $blob) {
+        fclose($blob);
+    }
     foreach ($results as $resource) {
         $closeResult($resource);
     }

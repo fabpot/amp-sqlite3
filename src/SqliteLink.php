@@ -12,4 +12,12 @@ use Amp\Sql\SqlLink;
 interface SqliteLink extends SqliteExecutor, SqlLink
 {
     public function beginTransaction(): SqliteTransaction;
+
+    public function openBlob(
+        string $table,
+        string $column,
+        int $rowId,
+        string $database = 'main',
+        SqliteBlobMode $mode = SqliteBlobMode::ReadOnly,
+    ): SqliteBlobStream;
 }

@@ -56,7 +56,6 @@ The initial release will not provide:
 - Per-query cancellation APIs.
 - SQLite URI filenames.
 - Online backup APIs.
-- Incremental BLOB I/O.
 - Custom SQL functions or aggregates.
 - Custom collations.
 - Authorizers.
@@ -101,6 +100,8 @@ The expected public classes and enums are:
 - `SqliteConnector`
 - `SqliteConfig`
 - `SqliteBlob`
+- `SqliteBlobStream`
+- `SqliteBlobMode`
 - `SqliteOpenMode`
 - `SqliteJournalMode`
 - `SqliteSynchronousMode`
@@ -157,6 +158,20 @@ public function getLastInsertId(): int;
 ```
 
 `SqliteTransaction` extends `Amp\Sql\SqlTransaction` and `SqliteLink`.
+
+`SqliteLink` also opens incremental BLOB streams:
+
+```php
+public function openBlob(
+    string $table,
+    string $column,
+    int $rowId,
+    string $database = 'main',
+    SqliteBlobMode $mode = SqliteBlobMode::ReadOnly,
+): SqliteBlobStream;
+```
+
+`SqliteBlobStream` extends `Amp\ByteStream\ReadableStream` and `Amp\ByteStream\WritableStream`. Read-only streams reject writes. It adds `getLength(): int` and `getPosition(): int`.
 
 ### Connector injection
 
@@ -324,6 +339,10 @@ The protocol supports operations equivalent to:
 - Fetch result batch
 - Close result
 - Close statement
+- Open BLOB
+- Read BLOB chunk
+- Write BLOB chunk
+- Close BLOB
 - Begin transaction
 - Commit transaction
 - Roll back transaction
@@ -332,7 +351,7 @@ The protocol supports operations equivalent to:
 - Roll back to savepoint
 - Close connection
 
-Statements and row-producing results are referenced by monotonically assigned integer IDs. Closing a result or statement is idempotent in both processes: a child-side close request for an ID that was allocated with the same resource type and has already been released is a benign no-op. A close request for a never-allocated or mismatched ID remains a protocol error. The parent does not send cleanup requests after connection-level invalidation. Every non-close operation using an unknown, stale, or mismatched ID is also a protocol error and closes the logical connection.
+Statements, row-producing results, and incremental BLOB streams are referenced by monotonically assigned integer IDs. Closing a result or statement is idempotent in both processes: a child-side close request for an ID that was allocated with the same resource type and has already been released is a benign no-op. A close request for a never-allocated or mismatched ID remains a protocol error. The parent does not send cleanup requests after connection-level invalidation. Every non-close operation using an unknown, stale, or mismatched ID is also a protocol error and closes the logical connection.
 
 Every response identifies the request it completes. The initial implementation serializes operations and allows only one in-flight request, but request identity keeps protocol failures detectable and leaves room for internal evolution.
 
@@ -340,7 +359,7 @@ Every response identifies the request it completes. The initial implementation s
 
 Operations on one connection are queued in invocation order.
 
-Only one SQLite operation is active at a time. A row-producing result retains ownership of the connection while it can request more batches. Other queries, preparations, statement executions, and transaction operations wait until that result is exhausted or explicitly closed. Calling another operation from the same fiber before consuming or closing its result would wait indefinitely, so this usage is explicitly unsupported and documented.
+Only one SQLite operation is active at a time. A row-producing result or incremental BLOB stream retains ownership of the connection while it can request more data. Other queries, preparations, statement executions, BLOB openings, and transaction operations wait until that resource is exhausted or explicitly closed. Calling another operation from the same fiber before consuming or closing its resource would wait indefinitely, so this usage is explicitly unsupported and documented.
 
 Closing the connection fails the active and queued operations. Reentrant calls receive no special treatment and follow the same queue.
 
@@ -448,6 +467,14 @@ Returned row values preserve native SQLite runtime types:
 | `NULL` | `null` |
 
 No conversion is based on a column's declared type.
+
+## Incremental BLOB I/O
+
+`SqliteLink::openBlob()` uses `SQLite3::openBlob()` in the child process. It opens the BLOB identified by database, table, column, and row ID in read-only or read-write mode. The BLOB must already exist; writable BLOBs are normally allocated to their final size with SQLite's `zeroblob()` function.
+
+The stream transfers bytes between processes in chunks and never materializes the entire BLOB unless the application chooses to buffer it. BLOB length is fixed while open. Writes cannot extend it and fail before sending data when they would exceed its length.
+
+An open BLOB owns its connection like an active row-producing result. Other operations wait until it is closed. Transaction links can open BLOBs, and their reads or writes remain part of that transaction. `close()` is idempotent, releases the native stream, and makes the connection available to the next operation.
 
 ## Result streaming
 
@@ -649,6 +676,10 @@ Tests must cover:
 - Races between automatic and best-effort closure.
 - Abandoned-result cleanup.
 - Large BLOB values.
+- Incremental BLOB reads and writes across multiple chunks.
+- Read-only BLOB streams and fixed-length write enforcement.
+- Connection queue release after BLOB closure.
+- Incremental BLOB writes inside transactions.
 - Connection queue release after exhaustion and closure.
 - Stable `null` row counts for row-producing results.
 - Zero affected rows for DDL executed after DML.
@@ -739,6 +770,7 @@ Tests must cover:
 - Implement retained worker-side statements and resource IDs.
 - Implement parameter validation and native type binding.
 - Implement statement reuse, serialization, closure, and BLOB round trips.
+- Implement incremental BLOB streams backed by `SQLite3::openBlob()`.
 
 ### Phase 5: Transactions
 
@@ -776,7 +808,6 @@ Potential follow-up proposals may cover:
 - A SQLite-aware connection pool.
 - Cooperative query interruption.
 - Online backup.
-- Incremental BLOB streams.
 - Custom functions, aggregates, and collations.
 - Explicit checkpoint management.
 - SQLite URI filenames.

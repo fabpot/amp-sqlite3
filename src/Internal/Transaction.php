@@ -7,6 +7,8 @@ namespace Fabpot\Amp\Sqlite\Internal;
 use Amp\DeferredFuture;
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
+use Fabpot\Amp\Sqlite\SqliteBlobMode;
+use Fabpot\Amp\Sqlite\SqliteBlobStream;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
@@ -54,6 +56,18 @@ final class Transaction implements SqliteTransaction
         $this->assertActive();
 
         return $this->connection->queryInTransaction($sql);
+    }
+
+    public function openBlob(
+        string $table,
+        string $column,
+        int $rowId,
+        string $database = 'main',
+        SqliteBlobMode $mode = SqliteBlobMode::ReadOnly,
+    ): SqliteBlobStream {
+        $this->assertActive();
+
+        return $this->connection->openBlobInTransaction($table, $column, $rowId, $database, $mode);
     }
 
     public function prepare(string $sql): SqliteStatement

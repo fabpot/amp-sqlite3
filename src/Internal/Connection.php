@@ -12,6 +12,8 @@ use Amp\Sql\SqlTransactionIsolation;
 use Amp\Sync\LocalMutex;
 use Amp\Sync\Lock;
 use Fabpot\Amp\Sqlite\SqliteBlob;
+use Fabpot\Amp\Sqlite\SqliteBlobMode;
+use Fabpot\Amp\Sqlite\SqliteBlobStream;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
@@ -155,9 +157,29 @@ final class Connection implements SqliteConnection
         $this->onClose->getFuture()->finally($onClose);
     }
 
+    public function openBlob(
+        string $table,
+        string $column,
+        int $rowId,
+        string $database = 'main',
+        SqliteBlobMode $mode = SqliteBlobMode::ReadOnly,
+    ): SqliteBlobStream {
+        return $this->openBlobStream($table, $column, $rowId, $database, $mode, false);
+    }
+
     public function queryInTransaction(string $sql): SqliteResult
     {
         return $this->run($sql, [], false, true);
+    }
+
+    public function openBlobInTransaction(
+        string $table,
+        string $column,
+        int $rowId,
+        string $database,
+        SqliteBlobMode $mode,
+    ): SqliteBlobStream {
+        return $this->openBlobStream($table, $column, $rowId, $database, $mode, true);
     }
 
     public function prepareInTransaction(string $sql): SqliteStatement
@@ -222,6 +244,74 @@ final class Connection implements SqliteConnection
         } finally {
             $lock?->release();
         }
+    }
+
+    private function openBlobStream(
+        string $table,
+        string $column,
+        int $rowId,
+        string $database,
+        SqliteBlobMode $mode,
+        bool $transactional,
+    ): SqliteBlobStream {
+        $this->assertOpen();
+        $lock = $this->acquire($transactional);
+
+        try {
+            $value = $this->request('openBlob', '', [
+                'table' => $table,
+                'column' => $column,
+                'row_id' => $rowId,
+                'database' => $database,
+                'mode' => $mode->name,
+            ]);
+        } catch (\Throwable $exception) {
+            $lock?->release();
+            throw $exception;
+        }
+
+        ++$this->activeLeases;
+        if ($transactional) {
+            $this->transactionBusy = new DeferredFuture();
+        }
+
+        $released = false;
+        $release = function () use (&$released, $transactional, $lock): void {
+            if ($released) {
+                return;
+            }
+
+            $released = true;
+            --$this->activeLeases;
+            $lock?->release();
+            if ($transactional) {
+                $this->transactionBusy?->complete();
+                $this->transactionBusy = null;
+            }
+        };
+        $blobId = $value['blob_id'];
+
+        return new BlobStream(
+            $value['length'],
+            $mode,
+            fn (int $length): string => $this->request('readBlob', '', [
+                'blob_id' => $blobId,
+                'length' => $length,
+            ])['bytes'],
+            fn (string $bytes): mixed => $this->request('writeBlob', '', [
+                'blob_id' => $blobId,
+                'bytes' => $bytes,
+            ]),
+            function () use ($blobId, $release): void {
+                try {
+                    if (!$this->closed) {
+                        $this->request('closeBlob', '', ['blob_id' => $blobId]);
+                    }
+                } finally {
+                    $release();
+                }
+            },
+        );
     }
 
     private function prepareStatement(string $sql, bool $transactional): SqliteStatement

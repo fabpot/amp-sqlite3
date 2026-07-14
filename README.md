@@ -99,6 +99,33 @@ $connection->execute(
 
 BLOB columns are returned as `SqliteBlob` instances.
 
+For large BLOBs, use incremental I/O after allocating the desired size with SQLite's `zeroblob()` function:
+
+```php
+use Fabpot\Amp\Sqlite\SqliteBlobMode;
+
+$result = $connection->query(
+    'INSERT INTO files (contents) VALUES (zeroblob(1048576))',
+);
+
+$blob = $connection->openBlob(
+    'files',
+    'contents',
+    $result->getLastInsertId(),
+    mode: SqliteBlobMode::ReadWrite,
+);
+
+try {
+    while (($chunk = fread($source, 8192)) !== false && $chunk !== '') {
+        $blob->write($chunk);
+    }
+} finally {
+    $blob->close();
+}
+```
+
+`SqliteBlobStream` implements AMPHP's `ReadableStream` and `WritableStream`. Its length is fixed when opened; writing past that length fails. An open BLOB owns its connection until it is closed, so always close it explicitly when abandoning a read or write.
+
 ## Transactions
 
 ```php
