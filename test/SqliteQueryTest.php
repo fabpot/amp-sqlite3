@@ -29,20 +29,21 @@ final class SqliteQueryTest extends TestCase
     /**
      * @dataProvider provideInvalidSql
      */
-    public function testRejectsInvalidSql(string $sql): void
+    public function testRejectsInvalidSql(string $sql, string $message): void
     {
         $this->expectException(SqliteQueryError::class);
+        $this->expectExceptionMessage($message);
 
         $this->connection->query($sql);
     }
 
     public static function provideInvalidSql(): iterable
     {
-        yield 'empty' => [''];
-        yield 'whitespace' => [" \n\t"];
-        yield 'comment' => ['/* only a comment */ -- still a comment'];
-        yield 'semicolon' => [';;;'];
-        yield 'second statement' => ['SELECT 1; SELECT 2'];
+        yield 'empty' => ['', 'SQL must contain an executable statement'];
+        yield 'whitespace' => [" \n\t", 'SQL must contain an executable statement'];
+        yield 'comment' => ['/* only a comment */ -- still a comment', 'SQL must contain an executable statement'];
+        yield 'semicolon' => [';;;', 'SQL must contain an executable statement'];
+        yield 'second statement' => ['SELECT 1; SELECT 2', 'Only one SQL statement may be executed at a time'];
     }
 
     public function testAllowsTrailingCommentsAndSemicolonsInsideCompoundStatement(): void

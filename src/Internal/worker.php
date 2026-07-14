@@ -161,12 +161,12 @@ return static function (Channel $channel): null {
             if ($request['operation'] === 'prepare') {
                 $statement = $database->prepare($request['sql']);
                 if (!$statement) {
-                    throw new RuntimeException('SQL must contain one statement');
+                    throw new RuntimeException('SQL must contain an executable statement');
                 }
                 try {
                     $consumedSql = $statement->getSQL();
                 } catch (Error $error) {
-                    throw new RuntimeException('SQL must contain one statement', previous: $error);
+                    throw new RuntimeException('SQL must contain an executable statement', previous: $error);
                 }
                 if (SqlStatementBoundary::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
                     $statement->close();
@@ -242,12 +242,12 @@ return static function (Channel $channel): null {
             } else {
                 $statement = $database->prepare($request['sql']);
                 if (!$statement) {
-                    throw new RuntimeException('SQL must contain one statement');
+                    throw new RuntimeException('SQL must contain an executable statement');
                 }
                 try {
                     $consumedSql = $statement->getSQL();
                 } catch (Error $error) {
-                    throw new RuntimeException('SQL must contain one statement', previous: $error);
+                    throw new RuntimeException('SQL must contain an executable statement', previous: $error);
                 }
                 if (SqlStatementBoundary::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
                     throw new RuntimeException('Only one SQL statement may be executed at a time');
