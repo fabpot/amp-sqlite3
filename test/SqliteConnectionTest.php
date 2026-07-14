@@ -20,6 +20,7 @@ use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
 use PHPUnit\Framework\TestCase;
+use function Amp\async;
 use function Amp\delay;
 
 final class SqliteConnectionTest extends TestCase
@@ -114,6 +115,43 @@ final class SqliteConnectionTest extends TestCase
             self::assertSame(['synchronous' => 1], $connection->query('PRAGMA synchronous')->fetchRow());
         } finally {
             $connection->close();
+            @\unlink($path);
+            @\unlink($path . '-shm');
+            @\unlink($path . '-wal');
+        }
+    }
+
+    public function testConcurrentConnectionsCanInitializeNewDatabase(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $connector = new SqliteConnector();
+        $connections = [];
+        $futures = [];
+
+        try {
+            for ($i = 0; $i < 10; ++$i) {
+                $futures[] = async(fn () => $connector->connect(new SqliteConfig($path)));
+            }
+
+            foreach ($futures as $future) {
+                $connection = $future->await();
+                $connections[\spl_object_id($connection)] = $connection;
+            }
+
+            foreach ($connections as $connection) {
+                self::assertSame(['journal_mode' => 'wal'], $connection->query('PRAGMA journal_mode')->fetchRow());
+            }
+        } finally {
+            foreach ($futures as $future) {
+                try {
+                    $connection = $future->await();
+                    $connections[\spl_object_id($connection)] = $connection;
+                } catch (\Throwable) {
+                }
+            }
+            foreach ($connections as $connection) {
+                $connection->close();
+            }
             @\unlink($path);
             @\unlink($path . '-shm');
             @\unlink($path . '-wal');

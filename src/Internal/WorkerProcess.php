@@ -24,6 +24,8 @@ use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
  */
 final class WorkerProcess
 {
+    private const SQLITE_BUSY = 5;
+
     private readonly \SQLite3 $database;
     private readonly int $batchSize;
     private bool $closed = false;
@@ -534,11 +536,28 @@ final class WorkerProcess
                 throw new \RuntimeException("Could not enable requested journal mode '{$open['journal_mode']}'");
             }
         } elseif ($open['path'] !== ':memory:' && $open['open_mode'] !== SqliteOpenMode::ReadOnly->name) {
-            $effective = $this->applyPragma('journal_mode', 'wal');
+            $effective = $this->enableWal($open['busy_timeout']);
             if (\strtolower((string) $effective) !== 'wal') {
                 throw new \RuntimeException("Could not enable WAL journal mode, SQLite selected '{$effective}'");
             }
         }
+    }
+
+    private function enableWal(int $busyTimeout): null|bool|int|float|string
+    {
+        $deadline = \hrtime(true) + $busyTimeout * 1_000_000;
+
+        do {
+            try {
+                return $this->applyPragma('journal_mode', 'wal');
+            } catch (\SQLite3Exception $exception) {
+                if (($exception->getCode() & 0xFF) !== self::SQLITE_BUSY || \hrtime(true) >= $deadline) {
+                    throw $exception;
+                }
+            }
+
+            \usleep((int) \min(1_000, \max(0, ($deadline - \hrtime(true)) / 1_000)));
+        } while (true);
     }
 
     /**
