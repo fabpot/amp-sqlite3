@@ -81,15 +81,22 @@ final class Connection implements SqliteConnection
             throw new SqliteTransactionError('A transaction is already active');
         }
 
-        $this->transactionLock = $this->mutex->acquire();
+        $lock = $this->mutex->acquire();
+
+        if ($this->activeTransaction?->get() !== null) {
+            $lock->release();
+
+            throw new SqliteTransactionError('A transaction is already active');
+        }
+
         try {
             $this->executeControl('BEGIN ' . $this->transactionMode->toSql());
         } catch (\Throwable $exception) {
-            $this->transactionLock->release();
-            $this->transactionLock = null;
+            $lock->release();
             throw $exception;
         }
 
+        $this->transactionLock = $lock;
         $transaction = new Transaction($this, $this->transactionMode);
         $this->activeTransaction = \WeakReference::create($transaction);
 

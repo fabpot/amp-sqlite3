@@ -59,6 +59,22 @@ final class SqliteTransactionTest extends TestCase
         $this->connection->setTransactionIsolation(SqlTransactionIsolationLevel::Serializable);
     }
 
+    public function testConcurrentBeginTransactionCallsSerialize(): void
+    {
+        $first = async(fn () => $this->connection->beginTransaction());
+        $second = async(fn () => $this->connection->beginTransaction());
+
+        $transaction = $first->await();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['first']);
+        $transaction->commit();
+
+        $transaction = $second->await();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['second']);
+        $transaction->rollback();
+
+        self::assertSame([['value' => 'first']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
     public function testNestedCommitAndRollbackUseSavepoints(): void
     {
         $transaction = $this->connection->beginTransaction();
