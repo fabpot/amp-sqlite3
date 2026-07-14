@@ -396,12 +396,21 @@ return static function (Channel $channel): null {
             ]);
 
             break;
+        } catch (RuntimeException $exception) {
+            $channel->send([
+                'id' => $request['id'],
+                'query_error' => [
+                    'message' => $exception->getMessage(),
+                    'code' => 0,
+                    'extended_code' => 0,
+                ],
+            ]);
         } catch (Throwable $exception) {
             $channel->send([
                 'id' => $request['id'],
                 'query_error' => [
                     'message' => $exception->getMessage(),
-                    'code' => $database->lastErrorCode(),
+                    'code' => $database->lastErrorCode() & 0xFF,
                     'extended_code' => $database->lastExtendedErrorCode(),
                 ],
             ]);

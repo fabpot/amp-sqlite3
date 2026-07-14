@@ -238,4 +238,38 @@ final class SqliteQueryTest extends TestCase
 
         self::assertSame(2, $result->getRowCount());
     }
+
+    public function testReportsPrimaryAndExtendedResultCodes(): void
+    {
+        $this->connection->query('CREATE TABLE unique_values (value INTEGER UNIQUE)');
+        $this->connection->execute('INSERT INTO unique_values VALUES (1)');
+
+        try {
+            $this->connection->execute('INSERT INTO unique_values VALUES (1)');
+            self::fail('Expected the duplicate value to fail');
+        } catch (SqliteQueryError $error) {
+            self::assertSame(19, $error->getResultCode());
+            self::assertSame(2067, $error->getExtendedResultCode());
+        }
+    }
+
+    public function testLibraryErrorsDoNotReportStaleResultCodes(): void
+    {
+        $this->connection->query('CREATE TABLE unique_values (value INTEGER UNIQUE)');
+        $this->connection->execute('INSERT INTO unique_values VALUES (1)');
+
+        try {
+            $this->connection->execute('INSERT INTO unique_values VALUES (1)');
+            self::fail('Expected the duplicate value to fail');
+        } catch (SqliteQueryError) {
+        }
+
+        try {
+            $this->connection->execute('SELECT ?', []);
+            self::fail('Expected the parameter count mismatch to fail');
+        } catch (SqliteQueryError $error) {
+            self::assertSame(0, $error->getResultCode());
+            self::assertSame(0, $error->getExtendedResultCode());
+        }
+    }
 }
