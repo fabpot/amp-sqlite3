@@ -240,7 +240,26 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(1, $insert->getRowCount());
         self::assertSame(1, $insert->getLastInsertId());
         self::assertNull($insert->getColumnCount());
+        self::assertNull($insert->getColumnNames());
         self::assertSame(0, $ddl->getRowCount());
+    }
+
+    public function testReportsColumnNames(): void
+    {
+        $result = $this->connection->query('SELECT 1 AS id, 2 AS value, 3 AS "complex name"');
+
+        self::assertSame(['id', 'value', 'complex name'], $result->getColumnNames());
+        self::assertSame(3, $result->getColumnCount());
+    }
+
+    public function testReportsColumnNamesForEmptyResults(): void
+    {
+        $this->connection->query('CREATE TABLE entries (id INTEGER, value TEXT)');
+
+        $result = $this->connection->query('SELECT id, value FROM entries');
+
+        self::assertSame(['id', 'value'], $result->getColumnNames());
+        self::assertNull($result->fetchRow());
     }
 
     public function testCommandRowCountIncludesTriggerChanges(): void

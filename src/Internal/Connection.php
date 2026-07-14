@@ -405,6 +405,7 @@ final class Connection implements SqliteConnection
             $value['rows'],
             $value['row_count'],
             $value['column_count'],
+            $value['column_names'],
             $value['last_insert_id'],
             $value['result_id'],
             $value['exhausted'],

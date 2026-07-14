@@ -361,10 +361,16 @@ return static function (Channel $channel): null {
                 'exhausted' => true,
                 'row_count' => $columns > 0 ? null : $after - $before,
                 'column_count' => $columns ?: null,
+                'column_names' => null,
                 'last_insert_id' => $database->lastInsertRowID(),
             ];
 
             if ($columns > 0) {
+                $columnNames = [];
+                for ($column = 0; $column < $columns; ++$column) {
+                    $columnNames[] = $nativeResult->columnName($column);
+                }
+                $value['column_names'] = $columnNames;
                 $resultId = $nextResultId++;
                 $knownResultIds[$resultId] = true;
                 $results[$resultId] = ['result' => $nativeResult, 'statement' => $statement, 'statement_id' => $statementId, 'pending' => null];

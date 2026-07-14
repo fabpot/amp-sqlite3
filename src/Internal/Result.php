@@ -24,6 +24,7 @@ final class Result implements SqliteResult, \IteratorAggregate
 
     /**
      * @param list<array<string, null|bool|int|float|string|SqliteBlob>> $rows
+     * @param list<string>|null $columnNames
      * @param null|\Closure(int):array{rows: list<array<string, null|bool|int|float|string|SqliteBlob>>, exhausted: bool} $fetch
      * @param null|\Closure(int):void $close
      * @param null|\Closure():void $onRelease
@@ -32,6 +33,7 @@ final class Result implements SqliteResult, \IteratorAggregate
         private array $rows,
         private readonly ?int $rowCount,
         private readonly ?int $columnCount,
+        private readonly ?array $columnNames,
         private readonly int $lastInsertId,
         private readonly ?int $resultId,
         bool $exhausted,
@@ -101,6 +103,11 @@ final class Result implements SqliteResult, \IteratorAggregate
     public function getColumnCount(): ?int
     {
         return $this->columnCount;
+    }
+
+    public function getColumnNames(): ?array
+    {
+        return $this->columnNames;
     }
 
     public function getLastInsertId(): int

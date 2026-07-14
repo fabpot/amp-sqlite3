@@ -15,4 +15,9 @@ interface SqliteResult extends SqlResult, Closable
     public function getNextResult(): ?self;
 
     public function getLastInsertId(): int;
+
+    /**
+     * @return list<string>|null Column names of a row-producing result, or null for a command result.
+     */
+    public function getColumnNames(): ?array;
 }
