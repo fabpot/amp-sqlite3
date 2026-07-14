@@ -11,7 +11,7 @@ use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop;
+use function Amp\delay;
 
 final class SqliteConnectionTest extends TestCase
 {
@@ -155,7 +155,7 @@ final class SqliteConnectionTest extends TestCase
         } catch (SqliteConnectionException $exception) {
             self::assertSame("Unknown operation 'unknown'", $exception->getMessage());
         }
-        EventLoop::run();
+        delay(0);
 
         self::assertTrue($connection->isClosed());
         self::assertSame(1, $closed);

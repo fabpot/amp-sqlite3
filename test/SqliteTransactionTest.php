@@ -9,7 +9,6 @@ use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop;
 use function Amp\async;
 use function Amp\delay;
 
@@ -196,11 +195,11 @@ final class SqliteTransactionTest extends TestCase
         });
 
         $nested->commit();
-        EventLoop::run();
+        delay(0);
         self::assertSame(0, $commits);
 
         $transaction->commit();
-        EventLoop::run();
+        delay(0);
         self::assertSame(1, $commits);
     }
 
@@ -227,7 +226,7 @@ final class SqliteTransactionTest extends TestCase
 
         self::assertTrue($transaction->isActive());
         $transaction->rollback();
-        EventLoop::run();
+        delay(0);
         self::assertSame(0, $commits);
         self::assertSame(1, $rollbacks);
 
@@ -248,7 +247,7 @@ final class SqliteTransactionTest extends TestCase
         });
 
         $transaction->commit();
-        EventLoop::run();
+        delay(0);
 
         self::assertSame(1, $commits);
         self::assertSame(0, $rollbacks);
@@ -271,7 +270,7 @@ final class SqliteTransactionTest extends TestCase
             self::fail('Expected the connection to fail');
         } catch (\Amp\Sql\SqlConnectionException) {
         }
-        EventLoop::run();
+        delay(0);
 
         self::assertFalse($transaction->isActive());
         self::assertSame(1, $rollbacks);

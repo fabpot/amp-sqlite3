@@ -9,7 +9,7 @@ use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop;
+use function Amp\delay;
 
 final class SqliteStatementTest extends TestCase
 {
@@ -80,7 +80,7 @@ final class SqliteStatementTest extends TestCase
 
         $statement->close();
         $statement->close();
-        EventLoop::run();
+        delay(0);
 
         self::assertSame(1, $closed);
         self::assertTrue($statement->isClosed());
