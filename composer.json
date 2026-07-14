@@ -1,5 +1,5 @@
 {
-    "name": "fabpot/amphp-sqlite",
+    "name": "fabpot/amphp-sqlite3",
     "description": "Asynchronous SQLite client for PHP based on Amp.",
     "keywords": [
         "database",

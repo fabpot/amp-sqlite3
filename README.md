@@ -5,7 +5,7 @@ An asynchronous SQLite driver for AMPHP. Every logical connection owns a dedicat
 ## Installation
 
 ```bash
-composer require fabpot/amphp-sqlite
+composer require fabpot/amphp-sqlite3
 ```
 
 PHP 8.4 or newer, `ext-sqlite3`, and SQLite 3.31.0 or newer are required.
