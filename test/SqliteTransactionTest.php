@@ -93,6 +93,29 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame([['value' => 'after nested']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
+    public function testTransactionStatementWaitsForNestedTransaction(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $statement = $transaction->prepare('INSERT INTO entries VALUES (?)');
+        $nested = $transaction->beginTransaction();
+        $future = async(fn () => $statement->execute(['after nested']));
+
+        self::assertFalse($future->isComplete());
+        $nested->commit();
+        $future->await();
+        $transaction->commit();
+
+        try {
+            $statement->execute(['after commit']);
+            self::fail('Expected the statement execution to fail');
+        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
+            self::assertSame('The transaction has been committed or rolled back', $error->getMessage());
+        }
+
+        $statement->close();
+        self::assertSame([['value' => 'after nested']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
     public function testTransactionWaitsForActiveResult(): void
     {
         $transaction = $this->connection->beginTransaction();

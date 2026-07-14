@@ -63,7 +63,7 @@ final class Connection implements SqliteConnection
 
     public function prepare(string $sql): SqliteStatement
     {
-        return $this->prepareStatement($sql, false);
+        return $this->prepareStatement($sql);
     }
 
     public function execute(string $sql, array $params = []): SqliteResult
@@ -182,9 +182,9 @@ final class Connection implements SqliteConnection
         return $this->openBlobStream($table, $column, $rowId, $database, $mode, true);
     }
 
-    public function prepareInTransaction(string $sql): SqliteStatement
+    public function prepareInTransaction(string $sql, Transaction $transaction): SqliteStatement
     {
-        return $this->prepareStatement($sql, true);
+        return $this->prepareStatement($sql, $transaction);
     }
 
     public function executeInTransaction(string $sql, array $params): SqliteResult
@@ -238,7 +238,13 @@ final class Connection implements SqliteConnection
             return;
         }
 
-        $lock = $this->acquire($transactional);
+        if ($transactional && $this->transactionLock !== null) {
+            $this->awaitTransactionResource();
+            $lock = null;
+        } else {
+            $lock = $this->mutex->acquire();
+        }
+
         try {
             $this->request('closeStatement', $sql, ['statement_id' => $statementId]);
         } finally {
@@ -314,10 +320,10 @@ final class Connection implements SqliteConnection
         );
     }
 
-    private function prepareStatement(string $sql, bool $transactional): SqliteStatement
+    private function prepareStatement(string $sql, ?Transaction $transaction = null): SqliteStatement
     {
         $this->assertOpen();
-        $lock = $this->acquire($transactional);
+        $lock = $this->acquire($transaction !== null);
 
         try {
             $value = $this->request('prepare', $sql, ['sql' => $sql]);
@@ -325,7 +331,7 @@ final class Connection implements SqliteConnection
             $lock?->release();
         }
 
-        return new Statement($this, $value['statement_id'], $sql, $transactional);
+        return new Statement($this, $value['statement_id'], $sql, $transaction);
     }
 
     private function run(string $sql, array $params, bool $bindParameters, bool $transactional): SqliteResult

@@ -74,7 +74,7 @@ final class Transaction implements SqliteTransaction
     {
         $this->assertActive();
 
-        return $this->connection->prepareInTransaction($sql);
+        return $this->connection->prepareInTransaction($sql, $this);
     }
 
     public function execute(string $sql, array $params = []): SqliteResult
@@ -204,6 +204,11 @@ final class Transaction implements SqliteTransaction
             $this->nestedBusy?->complete();
             $this->nestedBusy = null;
         }
+    }
+
+    public function awaitAvailable(): void
+    {
+        $this->assertActive();
     }
 
     private function assertActive(): void
