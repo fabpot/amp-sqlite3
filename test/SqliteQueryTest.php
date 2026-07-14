@@ -60,6 +60,11 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(['name' => 'CREATED'], $this->connection->query('SELECT name FROM events')->fetchRow());
     }
 
+    public function testAllowsUnterminatedTrailingBlockComment(): void
+    {
+        self::assertSame([1 => 1], $this->connection->query('SELECT 1; /* trailing')->fetchRow());
+    }
+
     public function testStreamsRowsAcrossBatches(): void
     {
         $this->connection->query('CREATE TABLE numbers (value INTEGER)');

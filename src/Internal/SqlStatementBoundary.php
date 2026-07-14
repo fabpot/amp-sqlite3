@@ -12,7 +12,7 @@ final class SqlStatementBoundary
             $previous = $remainder;
             $remainder = \ltrim($remainder);
             $remainder = (string) \preg_replace(
-                '/\A(?:--[^\r\n]*(?:\r?\n|$)|\/\*.*?\*\/)/s',
+                '/\A(?:--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))/s',
                 '',
                 $remainder,
                 1,
