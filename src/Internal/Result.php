@@ -19,6 +19,7 @@ final class Result implements SqliteResult, \IteratorAggregate
 
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
+    private bool $explicitlyClosed = false;
     private bool $exhausted;
 
     /**
@@ -55,6 +56,10 @@ final class Result implements SqliteResult, \IteratorAggregate
     public function fetchRow(): ?array
     {
         if ($this->closed) {
+            if (!$this->explicitlyClosed && $this->exhausted) {
+                return null;
+            }
+
             throw new \Error('The SQLite result is closed');
         }
 
@@ -108,6 +113,8 @@ final class Result implements SqliteResult, \IteratorAggregate
         if ($this->closed) {
             return;
         }
+
+        $this->explicitlyClosed = true;
 
         try {
             if ($this->resultId !== null && $this->close !== null) {

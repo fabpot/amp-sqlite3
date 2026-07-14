@@ -100,7 +100,17 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
     }
 
-    public function testFetchAfterCloseFails(): void
+    public function testFetchRowReturnsNullAfterExhaustion(): void
+    {
+        $result = $this->connection->query('SELECT 1 AS value');
+
+        self::assertSame(['value' => 1], $result->fetchRow());
+        self::assertNull($result->fetchRow());
+        self::assertNull($this->connection->query('SELECT 1 WHERE 0')->fetchRow());
+        self::assertNull($this->connection->query('CREATE TABLE empty_result (value INTEGER)')->fetchRow());
+    }
+
+    public function testFetchAfterExplicitCloseFails(): void
     {
         $result = $this->connection->query('SELECT 1');
         $result->close();
