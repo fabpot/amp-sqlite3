@@ -222,6 +222,23 @@ final class SqliteTransactionTest extends TestCase
         $connection->close();
     }
 
+    public function testConnectionCloseReleasesParentWaitingForNestedTransaction(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $transaction->beginTransaction();
+        $future = async(fn () => $transaction->query('SELECT 1'));
+
+        self::assertFalse($future->isComplete());
+        $this->connection->close();
+
+        try {
+            $future->await();
+            self::fail('Expected the closed transaction to reject the query');
+        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
+            self::assertSame('The transaction has been committed or rolled back', $error->getMessage());
+        }
+    }
+
     public function testCloseRollsBack(): void
     {
         $transaction = $this->connection->beginTransaction();

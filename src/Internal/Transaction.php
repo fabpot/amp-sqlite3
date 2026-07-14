@@ -40,6 +40,7 @@ final class Transaction implements SqliteTransaction
         $connection->onClose(function (): void {
             if ($this->active) {
                 $this->active = false;
+                $this->parent?->releaseNested($this);
                 $this->onRollback->complete();
                 $this->onClose->complete();
             }
