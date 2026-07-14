@@ -155,6 +155,21 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame([['value' => 'after result']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
+    public function testActiveResultKeepsTransactionAlive(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $result = $transaction->query("SELECT 'first' AS value UNION ALL SELECT 'second'");
+        unset($transaction);
+        \gc_collect_cycles();
+
+        self::assertSame(['value' => 'first'], $result->fetchRow());
+        $result->close();
+        unset($result);
+        \gc_collect_cycles();
+
+        self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
+    }
+
     public function testConcurrentTransactionalQueriesSerializeWithoutLosingWakeups(): void
     {
         $this->connection->execute('INSERT INTO entries VALUES (?), (?), (?)', ['a', 'b', 'c']);
@@ -360,6 +375,23 @@ final class SqliteTransactionTest extends TestCase
         self::assertFalse($nested->isActive());
         self::assertFalse($transaction->isActive());
         self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testActiveBlobKeepsTransactionAlive(): void
+    {
+        $this->connection->query('CREATE TABLE files (contents BLOB)');
+        $this->connection->query('INSERT INTO files VALUES (zeroblob(1))');
+        $transaction = $this->connection->beginTransaction();
+        $blob = $transaction->openBlob('files', 'contents', 1);
+        unset($transaction);
+        \gc_collect_cycles();
+
+        self::assertSame("\0", $blob->read());
+        $blob->close();
+        unset($blob);
+        \gc_collect_cycles();
+
+        self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
     }
 }
 

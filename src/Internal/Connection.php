@@ -202,9 +202,9 @@ final class Connection implements SqliteConnection
         $this->copyDatabase('restore', $sourcePath, $database);
     }
 
-    public function queryInTransaction(string $sql): SqliteResult
+    public function queryInTransaction(string $sql, Transaction $transaction): SqliteResult
     {
-        return $this->run($sql, [], false, true);
+        return $this->run($sql, [], false, $transaction);
     }
 
     public function openBlobInTransaction(
@@ -213,8 +213,9 @@ final class Connection implements SqliteConnection
         int $rowId,
         string $database,
         SqliteBlobMode $mode,
+        Transaction $transaction,
     ): SqliteBlobStream {
-        return $this->openBlobStream($table, $column, $rowId, $database, $mode, true);
+        return $this->openBlobStream($table, $column, $rowId, $database, $mode, $transaction);
     }
 
     public function prepareInTransaction(string $sql, Transaction $transaction): SqliteStatement
@@ -222,15 +223,16 @@ final class Connection implements SqliteConnection
         return $this->prepareStatement($sql, $transaction);
     }
 
-    public function executeInTransaction(string $sql, #[\SensitiveParameter] array $params): SqliteResult
+    public function executeInTransaction(string $sql, #[\SensitiveParameter] array $params, Transaction $transaction): SqliteResult
     {
-        return $this->run($sql, $params, true, true);
+        return $this->run($sql, $params, true, $transaction);
     }
 
-    public function executeStatement(int $statementId, string $sql, #[\SensitiveParameter] array $params, bool $transactional): SqliteResult
+    public function executeStatement(int $statementId, string $sql, #[\SensitiveParameter] array $params, ?Transaction $transaction): SqliteResult
     {
         $this->assertOpen();
         self::validateParameterValues($params);
+        $transactional = $transaction !== null;
         $lock = $this->acquire($transactional);
 
         try {
@@ -240,7 +242,7 @@ final class Connection implements SqliteConnection
             throw $exception;
         }
 
-        return $this->createResult($value, $sql, $lock, $transactional);
+        return $this->createResult($value, $sql, $lock, $transaction);
     }
 
     public function executeControl(string $sql): void
@@ -300,9 +302,10 @@ final class Connection implements SqliteConnection
         int $rowId,
         string $database,
         SqliteBlobMode $mode,
-        bool $transactional,
+        Transaction|false $transaction,
     ): SqliteBlobStream {
         $this->assertOpen();
+        $transactional = $transaction !== false;
         $lock = $this->acquire($transactional);
 
         try {
@@ -357,6 +360,7 @@ final class Connection implements SqliteConnection
                     $release();
                 }
             },
+            $transaction ?: null,
         );
     }
 
@@ -374,10 +378,11 @@ final class Connection implements SqliteConnection
         return new Statement($this, $value['statement_id'], $sql, $transaction);
     }
 
-    private function run(string $sql, #[\SensitiveParameter] array $params, bool $bindParameters, bool $transactional): SqliteResult
+    private function run(string $sql, #[\SensitiveParameter] array $params, bool $bindParameters, Transaction|false $transaction): SqliteResult
     {
         $this->assertOpen();
         self::validateParameterValues($params);
+        $transactional = $transaction !== false;
         $lock = $this->acquire($transactional);
 
         try {
@@ -391,7 +396,7 @@ final class Connection implements SqliteConnection
             throw $exception;
         }
 
-        return $this->createResult($value, $sql, $lock, $transactional);
+        return $this->createResult($value, $sql, $lock, $transaction ?: null);
     }
 
     private function acquire(bool $transactional): ?Lock
@@ -418,8 +423,9 @@ final class Connection implements SqliteConnection
         }
     }
 
-    private function createResult(array $value, string $sql, ?Lock $lock, bool $transactional): SqliteResult
+    private function createResult(array $value, string $sql, ?Lock $lock, ?Transaction $transaction = null): SqliteResult
     {
+        $transactional = $transaction !== null;
         $onRelease = null;
         if ($value['exhausted']) {
             $lock?->release();
@@ -455,6 +461,7 @@ final class Connection implements SqliteConnection
             fn (int $resultId): mixed => $this->requestResult('closeResult', $resultId, $sql),
             $value['exhausted'] ? null : $lock,
             $onRelease,
+            $value['exhausted'] ? null : $transaction,
         );
     }
 

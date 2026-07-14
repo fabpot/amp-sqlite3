@@ -110,6 +110,16 @@ final class SqliteStatementTest extends TestCase
         self::assertSame(['value' => 3], $this->connection->query('SELECT 3 AS value')->fetchRow());
     }
 
+    public function testExecutingStatementAgainClosesPreviousResult(): void
+    {
+        $statement = $this->connection->prepare('SELECT 1 AS value UNION ALL SELECT 2');
+        $first = $statement->execute();
+        $second = $statement->execute();
+
+        self::assertTrue($first->isClosed());
+        self::assertSame([['value' => 1], ['value' => 2]], \iterator_to_array($second));
+    }
+
     public function testClosingStatementWhileTransactionIsActive(): void
     {
         $statement = $this->connection->prepare('SELECT 1');

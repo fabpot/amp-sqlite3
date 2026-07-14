@@ -34,6 +34,7 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
     private int $position = 0;
+    private ?Transaction $transaction;
 
     public function __construct(
         private readonly int $length,
@@ -41,9 +42,11 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
         private readonly \Closure $read,
         private readonly \Closure $write,
         private readonly \Closure $close,
+        ?Transaction $transaction = null,
         private readonly int $chunkSize = self::DEFAULT_CHUNK_SIZE,
     ) {
         $this->onClose = new DeferredFuture();
+        $this->transaction = $transaction;
     }
 
     public function __destruct()
@@ -130,6 +133,9 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
         try {
             ($this->close)();
         } finally {
+            if ($this->transaction !== null) {
+                $this->transaction = null;
+            }
             $this->onClose->complete();
         }
     }

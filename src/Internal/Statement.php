@@ -51,7 +51,8 @@ final class Statement implements SqliteStatement
         }
 
         $this->transaction?->awaitAvailable();
-        $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $this->transaction !== null);
+        $this->activeResult?->close();
+        $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $this->transaction);
         $this->lastUsedAt = \time();
         if (!$result->isClosed()) {
             $this->activeResult = $result;

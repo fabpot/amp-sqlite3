@@ -30,6 +30,7 @@ final class Result implements SqliteResult, \IteratorAggregate
     private bool $closed = false;
     private bool $explicitlyClosed = false;
     private bool $exhausted;
+    private ?Transaction $transaction;
 
     /**
      * @param list<array<string, null|bool|int|float|string|SqliteBlob>> $rows
@@ -50,9 +51,11 @@ final class Result implements SqliteResult, \IteratorAggregate
         private readonly ?\Closure $close,
         private readonly ?Lock $lock,
         private readonly ?\Closure $onRelease,
+        ?Transaction $transaction = null,
     ) {
         $this->onClose = new DeferredFuture();
         $this->exhausted = $exhausted;
+        $this->transaction = $transaction;
 
         if ($exhausted && $rows === []) {
             $this->finish();
@@ -186,6 +189,9 @@ final class Result implements SqliteResult, \IteratorAggregate
         $this->lock?->release();
         if ($this->onRelease !== null) {
             ($this->onRelease)();
+        }
+        if ($this->transaction !== null) {
+            $this->transaction = null;
         }
         $this->onClose->complete();
     }

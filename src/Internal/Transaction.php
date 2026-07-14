@@ -57,7 +57,7 @@ final class Transaction implements SqliteTransaction
     {
         $this->assertActive();
 
-        return $this->connection->queryInTransaction($sql);
+        return $this->connection->queryInTransaction($sql, $this);
     }
 
     public function openBlob(
@@ -69,7 +69,7 @@ final class Transaction implements SqliteTransaction
     ): SqliteBlobStream {
         $this->assertActive();
 
-        return $this->connection->openBlobInTransaction($table, $column, $rowId, $database, $mode);
+        return $this->connection->openBlobInTransaction($table, $column, $rowId, $database, $mode, $this);
     }
 
     public function prepare(string $sql): SqliteStatement
@@ -83,7 +83,7 @@ final class Transaction implements SqliteTransaction
     {
         $this->assertActive();
 
-        return $this->connection->executeInTransaction($sql, $params);
+        return $this->connection->executeInTransaction($sql, $params, $this);
     }
 
     public function beginTransaction(): SqliteTransaction
