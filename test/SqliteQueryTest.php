@@ -13,10 +13,15 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
+use Fabpot\Amp\Sqlite\Internal\ProtocolError;
+use Fabpot\Amp\Sqlite\Internal\WorkerProcess;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteJournalMode;
+use Fabpot\Amp\Sqlite\SqliteOpenMode;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
+use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
@@ -126,6 +131,34 @@ final class SqliteQueryTest extends TestCase
 
         self::assertTrue($result->isClosed());
         self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
+    }
+
+    public function testInitialFetchErrorDoesNotLeaveAStaleResult(): void
+    {
+        $worker = $this->createWorker(batchSize: 3);
+
+        try {
+            $worker->handle(['operation' => 'execute', 'sql' => 'CREATE TABLE fetch_errors (value INTEGER)', 'params' => [], 'bind_parameters' => false]);
+            $worker->handle(['operation' => 'execute', 'sql' => 'INSERT INTO fetch_errors VALUES (1), (2), (3)', 'params' => [], 'bind_parameters' => false]);
+
+            try {
+                $worker->handle([
+                    'operation' => 'execute',
+                    'sql' => "SELECT CASE value WHEN 3 THEN json_extract('invalid', '$') ELSE value END FROM fetch_errors",
+                    'params' => [],
+                    'bind_parameters' => false,
+                ]);
+                self::fail('Expected the initial batch to fail');
+            } catch (\SQLite3Exception) {
+            }
+
+            $this->expectException(ProtocolError::class);
+            $this->expectExceptionMessage("Unknown result ID '1'");
+
+            $worker->handle(['operation' => 'fetch', 'result_id' => 1]);
+        } finally {
+            $worker->shutdown();
+        }
     }
 
     public function testClosingResultReleasesConnection(): void
@@ -314,5 +347,24 @@ final class SqliteQueryTest extends TestCase
             self::assertSame(0, $error->getResultCode());
             self::assertSame(0, $error->getExtendedResultCode());
         }
+    }
+
+    private function createWorker(int $batchSize): WorkerProcess
+    {
+        return new WorkerProcess([
+            'path' => ':memory:',
+            'open_mode' => SqliteOpenMode::ReadWriteCreate->name,
+            'journal_mode' => SqliteJournalMode::Automatic->value,
+            'synchronous_mode' => SqliteSynchronousMode::Automatic->value,
+            'foreign_keys' => true,
+            'busy_timeout' => 5_000,
+            'batch_size' => $batchSize,
+            'trusted_schema' => false,
+            'extended_result_codes' => true,
+            'pragmas' => [],
+            'functions' => [],
+            'aggregates' => [],
+            'collations' => [],
+        ]);
     }
 }

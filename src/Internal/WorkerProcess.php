@@ -31,20 +31,11 @@ final class WorkerProcess
     private int $nextResultId = 1;
     private int $nextStatementId = 1;
 
-    /** @var array<int, true> */
-    private array $knownBlobIds = [];
-
     /** @var array<int, resource> */
     private array $blobs = [];
 
-    /** @var array<int, true> */
-    private array $knownStatementIds = [];
-
     /** @var array<int, \SQLite3Stmt> */
     private array $statements = [];
-
-    /** @var array<int, true> */
-    private array $knownResultIds = [];
 
     /** @var array<int, array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: array<string, mixed>|null}> */
     private array $results = [];
@@ -210,7 +201,6 @@ final class WorkerProcess
             $flags,
         );
         $blobId = $this->nextBlobId++;
-        $this->knownBlobIds[$blobId] = true;
         $this->blobs[$blobId] = $blob;
         $stat = \fstat($blob);
         if ($stat === false) {
@@ -252,7 +242,7 @@ final class WorkerProcess
 
     private function closeBlob(int $blobId): null
     {
-        if (!isset($this->knownBlobIds[$blobId])) {
+        if ($blobId < 1 || $blobId >= $this->nextBlobId) {
             throw new ProtocolError("Unknown BLOB ID '{$blobId}'");
         }
 
@@ -271,7 +261,6 @@ final class WorkerProcess
     {
         $statement = $this->prepareSingleStatement($sql, 'Only one SQL statement may be prepared at a time');
         $statementId = $this->nextStatementId++;
-        $this->knownStatementIds[$statementId] = true;
         $this->statements[$statementId] = $statement;
 
         return ['statement_id' => $statementId];
@@ -279,7 +268,7 @@ final class WorkerProcess
 
     private function closeStatement(int $statementId): null
     {
-        if (!isset($this->knownStatementIds[$statementId])) {
+        if ($statementId < 1 || $statementId >= $this->nextStatementId) {
             throw new ProtocolError("Unknown statement ID '{$statementId}'");
         }
 
@@ -317,7 +306,7 @@ final class WorkerProcess
 
     private function closeResult(int $resultId): null
     {
-        if (!isset($this->knownResultIds[$resultId])) {
+        if ($resultId < 1 || $resultId >= $this->nextResultId) {
             throw new ProtocolError("Unknown result ID '{$resultId}'");
         }
 
@@ -386,9 +375,15 @@ final class WorkerProcess
         $value['column_names'] = $columnNames;
 
         $resultId = $this->nextResultId++;
-        $this->knownResultIds[$resultId] = true;
         $this->results[$resultId] = ['result' => $nativeResult, 'statement' => $statement, 'statement_id' => $statementId, 'pending' => null];
-        $batch = $this->fetchBatch($resultId);
+        try {
+            $batch = $this->fetchBatch($resultId);
+        } catch (\Throwable $exception) {
+            $this->closeNativeResult($this->results[$resultId]);
+            unset($this->results[$resultId]);
+
+            throw $exception;
+        }
         $value['result_id'] = $resultId;
         $value['rows'] = $batch['rows'];
         $value['exhausted'] = $batch['exhausted'];

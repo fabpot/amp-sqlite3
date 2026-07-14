@@ -32,6 +32,10 @@ final class PooledResult extends SqlPooledResult implements SqliteResult
     {
         parent::__construct($result, $release);
         $this->result = $result;
+
+        if ($result->isClosed()) {
+            parent::getNextResult();
+        }
     }
 
     public function getNextResult(): ?SqliteResult

@@ -57,6 +57,24 @@ final class SqliteConnectionPoolTest extends TestCase
         self::assertGreaterThan(0, $this->pool->getConnectionCount());
     }
 
+    public function testCommandResultImmediatelyReleasesItsConnection(): void
+    {
+        $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 1);
+
+        try {
+            $command = $pool->execute('INSERT INTO entries VALUES (?)', ['first']);
+            $result = async(fn () => $pool->execute('INSERT INTO entries VALUES (?)', ['second']));
+            delay(0.01);
+
+            self::assertTrue($command->isClosed());
+            self::assertTrue($result->isComplete());
+            $result->await();
+            self::assertSame(2, $pool->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
+        } finally {
+            $pool->close();
+        }
+    }
+
     public function testConcurrentQueriesUseSeparateConnections(): void
     {
         $this->pool->execute('INSERT INTO entries VALUES (?)', ['row']);
