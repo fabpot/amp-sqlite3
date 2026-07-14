@@ -22,7 +22,10 @@ return static function (Channel $channel): null {
      *     batch_size: positive-int,
      *     trusted_schema: bool,
      *     extended_result_codes: bool,
-     *     pragmas: array<string, null|bool|int|float|string>
+     *     pragmas: array<string, null|bool|int|float|string>,
+     *     functions: array<string, array{callback: string, arg_count: int, deterministic: bool}>,
+     *     aggregates: array<string, array{step: string, final: string, arg_count: int}>,
+     *     collations: array<string, string>
      * } $open
      */
     $open = $channel->receive();
@@ -82,6 +85,34 @@ return static function (Channel $channel): null {
 
     foreach ($open['pragmas'] as $name => $value) {
         $pragma($name, $value);
+    }
+
+    foreach ($open['functions'] as $name => $function) {
+        if (!is_callable($function['callback'])) {
+            throw new RuntimeException("Custom SQL function '{$name}' does not resolve to a callable in the child process");
+        }
+        $flags = $function['deterministic'] ? SQLITE3_DETERMINISTIC : 0;
+        if (!$database->createFunction($name, $function['callback'], $function['arg_count'], $flags)) {
+            throw new RuntimeException("Could not register custom SQL function '{$name}'");
+        }
+    }
+
+    foreach ($open['aggregates'] as $name => $aggregate) {
+        if (!is_callable($aggregate['step']) || !is_callable($aggregate['final'])) {
+            throw new RuntimeException("Custom SQL aggregate '{$name}' does not resolve to callables in the child process");
+        }
+        if (!$database->createAggregate($name, $aggregate['step'], $aggregate['final'], $aggregate['arg_count'])) {
+            throw new RuntimeException("Could not register custom SQL aggregate '{$name}'");
+        }
+    }
+
+    foreach ($open['collations'] as $name => $callback) {
+        if (!is_callable($callback)) {
+            throw new RuntimeException("Custom collation '{$name}' does not resolve to a callable in the child process");
+        }
+        if (!$database->createCollation($name, $callback)) {
+            throw new RuntimeException("Could not register custom collation '{$name}'");
+        }
     }
 
     $channel->send(['ready' => true]);

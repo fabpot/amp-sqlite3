@@ -62,6 +62,9 @@ final class SqliteConnector implements SqlConnector
                 'trusted_schema' => $config->hasTrustedSchema(),
                 'extended_result_codes' => $config->hasExtendedResultCodes(),
                 'pragmas' => $config->getPragmas(),
+                'functions' => $config->getFunctions(),
+                'aggregates' => $config->getAggregates(),
+                'collations' => $config->getCollations(),
             ]);
             $ready = $context->receive($cancellation);
 
