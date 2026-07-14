@@ -391,13 +391,13 @@ return static function (Channel $channel): null {
             ]);
 
             break;
-        } catch (RuntimeException $exception) {
+        } catch (SQLite3Exception $exception) {
             $channel->send([
                 'id' => $request['id'],
                 'query_error' => [
                     'message' => $exception->getMessage(),
-                    'code' => 0,
-                    'extended_code' => 0,
+                    'code' => $exception->getCode() & 0xFF,
+                    'extended_code' => $database->lastExtendedErrorCode(),
                 ],
             ]);
         } catch (Throwable $exception) {
@@ -405,8 +405,8 @@ return static function (Channel $channel): null {
                 'id' => $request['id'],
                 'query_error' => [
                     'message' => $exception->getMessage(),
-                    'code' => $database->lastErrorCode() & 0xFF,
-                    'extended_code' => $database->lastExtendedErrorCode(),
+                    'code' => 0,
+                    'extended_code' => 0,
                 ],
             ]);
         }
