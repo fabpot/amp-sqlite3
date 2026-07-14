@@ -205,6 +205,16 @@ final class SqliteQueryTest extends TestCase
         }
     }
 
+    public function testRedactsParameterValuesFromExceptionTraces(): void
+    {
+        try {
+            $this->connection->execute('SELECT ?, ?', ['s3cr3t-password']);
+            self::fail('Expected the parameter count mismatch to fail');
+        } catch (SqliteQueryError $error) {
+            self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
+        }
+    }
+
     public function testPreservesSQLiteTypes(): void
     {
         $row = $this->connection->execute(

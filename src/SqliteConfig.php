@@ -164,7 +164,7 @@ final class SqliteConfig extends SqlConfig
         return $config;
     }
 
-    public function withPragma(string $name, null|bool|int|float|string $value): self
+    public function withPragma(string $name, #[\SensitiveParameter] null|bool|int|float|string $value): self
     {
         if (!\preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name)) {
             throw new \ValueError("Invalid pragma name '{$name}'");

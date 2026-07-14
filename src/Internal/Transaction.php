@@ -70,7 +70,7 @@ final class Transaction implements SqliteTransaction
         return $this->connection->prepareInTransaction($sql, $this);
     }
 
-    public function execute(string $sql, array $params = []): SqliteResult
+    public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult
     {
         $this->assertActive();
 

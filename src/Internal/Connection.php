@@ -70,7 +70,7 @@ final class Connection implements SqliteConnection
         return $this->prepareStatement($sql);
     }
 
-    public function execute(string $sql, array $params = []): SqliteResult
+    public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult
     {
         return $this->run($sql, $params, true, false);
     }
@@ -203,12 +203,12 @@ final class Connection implements SqliteConnection
         return $this->prepareStatement($sql, $transaction);
     }
 
-    public function executeInTransaction(string $sql, array $params): SqliteResult
+    public function executeInTransaction(string $sql, #[\SensitiveParameter] array $params): SqliteResult
     {
         return $this->run($sql, $params, true, true);
     }
 
-    public function executeStatement(int $statementId, string $sql, array $params, bool $transactional): SqliteResult
+    public function executeStatement(int $statementId, string $sql, #[\SensitiveParameter] array $params, bool $transactional): SqliteResult
     {
         $this->assertOpen();
         self::validateParameterValues($params);
@@ -332,7 +332,7 @@ final class Connection implements SqliteConnection
         return new Statement($this, $value['statement_id'], $sql, $transaction);
     }
 
-    private function run(string $sql, array $params, bool $bindParameters, bool $transactional): SqliteResult
+    private function run(string $sql, #[\SensitiveParameter] array $params, bool $bindParameters, bool $transactional): SqliteResult
     {
         $this->assertOpen();
         self::validateParameterValues($params);
@@ -424,7 +424,7 @@ final class Connection implements SqliteConnection
         return $this->request($operation, $sql, ['result_id' => $resultId]);
     }
 
-    private function request(string $operation, string $sql, array $data): mixed
+    private function request(string $operation, string $sql, #[\SensitiveParameter] array $data): mixed
     {
         $lock = $this->requestMutex->acquire();
         $id = $this->nextRequestId++;
@@ -514,7 +514,7 @@ final class Connection implements SqliteConnection
         }
     }
 
-    private static function validateParameterValues(array $params): void
+    private static function validateParameterValues(#[\SensitiveParameter] array $params): void
     {
         foreach ($params as $value) {
             if ($value !== null && !\is_bool($value) && !\is_int($value) && !\is_float($value) && !\is_string($value) && !$value instanceof SqliteBlob) {

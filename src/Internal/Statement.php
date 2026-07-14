@@ -35,7 +35,7 @@ final class Statement implements SqliteStatement
         $this->close();
     }
 
-    public function execute(array $params = []): SqliteResult
+    public function execute(#[\SensitiveParameter] array $params = []): SqliteResult
     {
         if ($this->closed) {
             throw new \Error('The SQLite statement is closed');
