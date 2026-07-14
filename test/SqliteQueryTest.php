@@ -8,6 +8,7 @@ use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 
@@ -26,9 +27,7 @@ final class SqliteQueryTest extends TestCase
         $this->connection->close();
     }
 
-    /**
-     * @dataProvider provideInvalidSql
-     */
+    #[DataProvider('provideInvalidSql')]
     public function testRejectsInvalidSql(string $sql, string $message): void
     {
         $this->expectException(SqliteQueryError::class);
@@ -166,9 +165,7 @@ final class SqliteQueryTest extends TestCase
         );
     }
 
-    /**
-     * @dataProvider provideInvalidParameters
-     */
+    #[DataProvider('provideInvalidParameters')]
     public function testRejectsInvalidParameters(string $sql, array $params): void
     {
         $this->expectException(SqliteQueryError::class);

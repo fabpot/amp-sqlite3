@@ -8,13 +8,12 @@ use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
 use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class SqliteConfigTest extends TestCase
 {
-    /**
-     * @dataProvider provideInvalidPaths
-     */
+    #[DataProvider('provideInvalidPaths')]
     public function testRejectsInvalidPath(string $path): void
     {
         $this->expectException(\ValueError::class);
@@ -29,9 +28,7 @@ final class SqliteConfigTest extends TestCase
         yield 'URI with uppercase scheme' => ['FILE:database.sqlite'];
     }
 
-    /**
-     * @dataProvider provideInvalidBusyTimeouts
-     */
+    #[DataProvider('provideInvalidBusyTimeouts')]
     public function testRejectsNegativeBusyTimeout(int $busyTimeout): void
     {
         $this->expectException(\ValueError::class);
@@ -45,9 +42,7 @@ final class SqliteConfigTest extends TestCase
         yield [PHP_INT_MIN];
     }
 
-    /**
-     * @dataProvider provideInvalidBatchSizes
-     */
+    #[DataProvider('provideInvalidBatchSizes')]
     public function testRejectsInvalidBatchSize(int $batchSize): void
     {
         $this->expectException(\ValueError::class);
@@ -61,9 +56,7 @@ final class SqliteConfigTest extends TestCase
         yield [-1];
     }
 
-    /**
-     * @dataProvider provideInvalidPragmaNames
-     */
+    #[DataProvider('provideInvalidPragmaNames')]
     public function testRejectsInvalidPragmaName(string $name): void
     {
         $this->expectException(\ValueError::class);
@@ -79,9 +72,7 @@ final class SqliteConfigTest extends TestCase
         yield ['cache_size; VACUUM'];
     }
 
-    /**
-     * @dataProvider provideReservedPragmaNames
-     */
+    #[DataProvider('provideReservedPragmaNames')]
     public function testRejectsReservedPragma(string $name): void
     {
         $this->expectException(\ValueError::class);
