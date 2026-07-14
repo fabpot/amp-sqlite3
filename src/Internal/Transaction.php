@@ -119,45 +119,39 @@ final class Transaction implements SqliteTransaction
     {
         $this->assertActive();
         $this->assertNoActiveNestedTransaction();
+        $this->connection->executeControl($this->savepoint === null ? 'COMMIT' : "RELEASE SAVEPOINT {$this->savepoint}");
         $this->active = false;
-
-        try {
-            $this->connection->executeControl($this->savepoint === null ? 'COMMIT' : "RELEASE SAVEPOINT {$this->savepoint}");
-        } finally {
-            $this->parent?->releaseNested($this);
-            if ($this->parent === null) {
-                $this->onCommit->complete();
-                $this->connection->releaseTransaction($this);
-            } else {
-                $onCommit = $this->onCommit;
-                $this->parent->onCommit(static fn () => $onCommit->isComplete() || $onCommit->complete());
-                $onRollback = $this->onRollback;
-                $this->parent->onRollback(static fn () => $onRollback->isComplete() || $onRollback->complete());
-            }
-            $this->onClose->complete();
+        $this->parent?->releaseNested($this);
+        if ($this->parent === null) {
+            $this->onCommit->complete();
+            $this->connection->releaseTransaction($this);
+        } else {
+            $onCommit = $this->onCommit;
+            $this->parent->onCommit(static fn () => $onCommit->isComplete() || $onCommit->complete());
+            $onRollback = $this->onRollback;
+            $this->parent->onRollback(static fn () => $onRollback->isComplete() || $onRollback->complete());
         }
+        $this->onClose->complete();
     }
 
     public function rollback(): void
     {
         $this->assertActive();
         $this->assertNoActiveNestedTransaction();
-        $this->active = false;
 
-        try {
-            if ($this->savepoint === null) {
-                $this->connection->executeControl('ROLLBACK');
-            } else {
-                $this->connection->executeControl("ROLLBACK TO SAVEPOINT {$this->savepoint}");
-                $this->connection->executeControl("RELEASE SAVEPOINT {$this->savepoint}");
-            }
-        } finally {
-            $this->parent?->releaseNested($this);
-            $this->onRollback->complete();
-            $this->onClose->complete();
-            if ($this->savepoint === null) {
-                $this->connection->releaseTransaction($this);
-            }
+        if ($this->savepoint === null) {
+            $this->connection->executeControl('ROLLBACK');
+        } else {
+            $this->connection->executeControl("ROLLBACK TO SAVEPOINT {$this->savepoint}");
+            $this->connection->executeControl("RELEASE SAVEPOINT {$this->savepoint}");
+        }
+
+        $this->active = false;
+        $this->parent?->releaseNested($this);
+        $this->onRollback->complete();
+        $this->onClose->complete();
+        if ($this->savepoint === null) {
+            $this->connection->releaseTransaction($this);
         }
     }
 

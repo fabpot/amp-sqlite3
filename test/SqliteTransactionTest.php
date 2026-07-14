@@ -125,6 +125,37 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame(1, $commits);
     }
 
+    public function testFailedCommitKeepsTransactionActive(): void
+    {
+        $this->connection->query('CREATE TABLE parents (id INTEGER PRIMARY KEY)');
+        $this->connection->query('CREATE TABLE children (parent_id INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED)');
+        $transaction = $this->connection->beginTransaction();
+        $commits = 0;
+        $rollbacks = 0;
+        $transaction->onCommit(static function () use (&$commits): void {
+            ++$commits;
+        });
+        $transaction->onRollback(static function () use (&$rollbacks): void {
+            ++$rollbacks;
+        });
+        $transaction->execute('INSERT INTO children VALUES (1)');
+
+        try {
+            $transaction->commit();
+            self::fail('Expected the deferred foreign key check to fail');
+        } catch (\Fabpot\Amp\Sqlite\SqliteQueryError) {
+        }
+
+        self::assertTrue($transaction->isActive());
+        $transaction->rollback();
+        EventLoop::run();
+        self::assertSame(0, $commits);
+        self::assertSame(1, $rollbacks);
+
+        $transaction = $this->connection->beginTransaction();
+        $transaction->rollback();
+    }
+
     public function testCallbacksRunOnce(): void
     {
         $transaction = $this->connection->beginTransaction();
