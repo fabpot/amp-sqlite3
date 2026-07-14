@@ -173,7 +173,7 @@ final class Connection implements SqliteConnection
     public function executeStatement(int $statementId, string $sql, array $params, bool $transactional): SqliteResult
     {
         $this->assertOpen();
-        self::validateParameters($sql, $params, true, true);
+        self::validateParameterValues($params);
         $lock = $this->acquire($transactional);
 
         try {
@@ -189,7 +189,11 @@ final class Connection implements SqliteConnection
     public function executeControl(string $sql): void
     {
         $this->awaitTransactionResource();
-        $value = $this->request('execute', $sql, ['sql' => $sql, 'params' => []]);
+        $value = $this->request('execute', $sql, [
+            'sql' => $sql,
+            'params' => [],
+            'bind_parameters' => true,
+        ]);
         if ($value['result_id'] !== null) {
             $this->requestResult('closeResult', $value['result_id'], $sql);
         }
@@ -223,7 +227,6 @@ final class Connection implements SqliteConnection
     private function prepareStatement(string $sql, bool $transactional): SqliteStatement
     {
         $this->assertOpen();
-        self::validateParameters($sql, [], true, false);
         $lock = $this->acquire($transactional);
 
         try {
@@ -235,14 +238,18 @@ final class Connection implements SqliteConnection
         return new Statement($this, $value['statement_id'], $sql, $transactional);
     }
 
-    private function run(string $sql, array $params, bool $allowPlaceholders, bool $transactional): SqliteResult
+    private function run(string $sql, array $params, bool $bindParameters, bool $transactional): SqliteResult
     {
         $this->assertOpen();
-        self::validateParameters($sql, $params, $allowPlaceholders, true);
+        self::validateParameterValues($params);
         $lock = $this->acquire($transactional);
 
         try {
-            $value = $this->request('execute', $sql, ['sql' => $sql, 'params' => $params]);
+            $value = $this->request('execute', $sql, [
+                'sql' => $sql,
+                'params' => $params,
+                'bind_parameters' => $bindParameters,
+            ]);
         } catch (\Throwable $exception) {
             $lock?->release();
             throw $exception;
@@ -389,43 +396,8 @@ final class Connection implements SqliteConnection
         }
     }
 
-    private static function validateParameters(string $sql, array $params, bool $allowPlaceholders, bool $validateValues): void
+    private static function validateParameterValues(array $params): void
     {
-        if (!SqlScanner::hasExecutableSql($sql)) {
-            throw new SqliteQueryError('SQL must contain one statement', $sql);
-        }
-
-        $placeholders = SqlScanner::placeholders($sql);
-        $styles = \array_unique(\array_column($placeholders, 'style'));
-        if (\in_array('unsupported', $styles, true) || \count($styles) > 1) {
-            throw new SqliteQueryError('Unsupported or mixed parameter placeholders', $sql);
-        }
-
-        if (!$allowPlaceholders && $placeholders !== []) {
-            throw new SqliteQueryError('Placeholders are not allowed in direct queries', $sql);
-        }
-
-        if (!$validateValues) {
-            return;
-        }
-
-        $style = $styles[0] ?? null;
-        if ($style === 'positional') {
-            if (!\array_is_list($params) || \count($params) !== \count($placeholders)) {
-                throw new SqliteQueryError('Positional parameters do not match the placeholders', $sql);
-            }
-        } elseif ($style === 'named') {
-            $names = \array_values(\array_unique(\array_column($placeholders, 'name')));
-            $keys = \array_keys($params);
-            \sort($names);
-            \sort($keys);
-            if ($names !== $keys) {
-                throw new SqliteQueryError('Named parameters do not match the placeholders', $sql);
-            }
-        } elseif ($params !== []) {
-            throw new SqliteQueryError('Parameters were provided but the statement has no placeholders', $sql);
-        }
-
         foreach ($params as $value) {
             if ($value !== null && !\is_bool($value) && !\is_int($value) && !\is_float($value) && !\is_string($value) && !$value instanceof SqliteBlob) {
                 throw new \TypeError('SQLite parameters must be null, bool, int, float, string, or SqliteBlob');

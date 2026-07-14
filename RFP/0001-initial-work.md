@@ -370,7 +370,7 @@ Multiple-result behavior is not supported. `SqliteResult::getNextResult()` alway
 
 ### `query()`
 
-`query(string $sql)` executes a statement without bound parameters. It rejects supported parameter placeholders rather than allowing SQLite to execute with unbound values.
+`query(string $sql)` executes a statement without bound parameters. It rejects statements with native SQLite parameters rather than allowing SQLite to execute with unbound values.
 
 It may return either a row-producing result or a command result.
 
@@ -399,23 +399,11 @@ Closing a statement is idempotent. Executing a closed statement fails clearly.
 
 ### Parameters
 
-The initial release supports either positional or named parameters in one statement, but never both.
+The driver delegates parameter syntax and binding to SQLite through `SQLite3Stmt::paramCount()` and `SQLite3Stmt::bindValue()`. It supports SQLite's native anonymous (`?`), numbered (`?NNN`), and named (`:name`, `@name`, and `$name`) parameters, including statements that mix forms.
 
-Positional parameters:
+Integer array keys are zero-based and bind to SQLite positions beginning at 1. String keys are passed to `SQLite3Stmt::bindValue()` unchanged. PHP accepts `:name` with or without its prefix and accepts `@name` with its prefix; parameters unsupported by PHP's string binding, including `$name`, can be bound by position. Repeated named parameters occupy one SQLite binding position.
 
-- Use anonymous `?` placeholders.
-- Are supplied as a zero-based PHP list.
-- Are bound to SQLite positions beginning at 1.
-
-Named parameters:
-
-- Use only the exact `:name` form.
-- Must be supplied with the exact `:name` key.
-- Do not accept unprefixed names, `@name`, or `$name`.
-
-Numbered placeholders such as `?1` are not supported initially.
-
-A SQLite-aware lexical scanner identifies placeholders while ignoring quoted strings, quoted identifiers, bracketed identifiers, and SQL comments. Its result is checked against native statement metadata. Missing parameters, extra parameters, mixed parameter styles, unsupported placeholder forms, and duplicate parameter keys are rejected before execution.
+The supplied parameter count must equal `SQLite3Stmt::paramCount()`. Every binding must be accepted by SQLite. Missing parameters, extra parameters, and invalid names or positions are rejected before execution. The driver does not parse SQL to discover parameters.
 
 Accepted values and native bindings are:
 
@@ -670,11 +658,11 @@ Tests must cover:
 
 Tests must cover:
 
-- Positional and named parameters.
+- Anonymous, numbered, and named parameters.
 - Missing and extra parameters.
 - Mixed parameter styles.
-- Repeated named placeholders.
-- Rejection of unsupported placeholder forms.
+- Repeated named parameters.
+- Rejection of invalid names and positions.
 - Rejection of empty, whitespace-only, comment-only, and semicolon-only SQL.
 - Consumed-prefix behavior across supported PHP versions with the minimum and current SQLite versions.
 - Null, boolean, integer, float, text, and BLOB bindings.
@@ -739,7 +727,7 @@ Tests must cover:
 
 ### Phase 3: Queries and streaming
 
-- Implement native single-statement validation and the placeholder scanner.
+- Implement native single-statement and parameter validation.
 - Implement direct query and temporary statement execution.
 - Verify native consumed-prefix behavior on all supported runtimes.
 - Implement command results and batched row-producing results.

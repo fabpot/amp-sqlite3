@@ -109,7 +109,7 @@ final class SqliteQueryTest extends TestCase
         $result->fetchRow();
     }
 
-    public function testSupportsPositionalAndNamedParameters(): void
+    public function testSupportsNativeSQLiteParameters(): void
     {
         self::assertSame(
             ['first' => 'one', 'second' => 2],
@@ -118,6 +118,13 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(
             ['value' => 'same', 'again' => 'same'],
             $this->connection->execute('SELECT :value AS value, :value AS again', [':value' => 'same'])->fetchRow(),
+        );
+        self::assertSame(
+            ['numbered' => 'one', 'colon' => 'two', 'at' => 'three', 'dollar' => 'four'],
+            $this->connection->execute(
+                'SELECT ?1 AS numbered, :colon AS colon, @at AS at, $dollar AS dollar',
+                [0 => 'one', ':colon' => 'two', '@at' => 'three', 3 => 'four'],
+            )->fetchRow(),
         );
     }
 
@@ -135,22 +142,10 @@ final class SqliteQueryTest extends TestCase
     {
         yield 'missing positional' => ['SELECT ?', []];
         yield 'extra positional' => ['SELECT 1', [1]];
-        yield 'non-list positional' => ['SELECT ?', [1 => 'value']];
+        yield 'invalid position' => ['SELECT ?', [1 => 'value']];
         yield 'missing named' => ['SELECT :value', []];
         yield 'extra named' => ['SELECT :value', [':value' => 1, ':extra' => 2]];
-        yield 'unprefixed named' => ['SELECT :value', ['value' => 1]];
-        yield 'mixed styles' => ['SELECT ?, :value', [1, ':value' => 2]];
-        yield 'numbered placeholder' => ['SELECT ?1', [1]];
-        yield 'at placeholder' => ['SELECT @value', ['@value' => 1]];
-        yield 'dollar placeholder' => ['SELECT $value', ['$value' => 1]];
-    }
-
-    public function testIgnoresPlaceholdersInQuotedValuesAndComments(): void
-    {
-        self::assertSame(
-            ['literal' => ':ignored', 'value' => 'bound'],
-            $this->connection->execute("SELECT ':ignored' AS literal, ? AS value -- ? :ignored", ['bound'])->fetchRow(),
-        );
+        yield 'invalid named parameter' => ['SELECT :value', ['missing' => 1]];
     }
 
     public function testQueryRejectsPlaceholders(): void

@@ -50,7 +50,7 @@ $result = $connection->execute(
 echo $result->getLastInsertId();
 ```
 
-Positional placeholders use anonymous `?` placeholders and zero-based lists. Named placeholders use `:name` and require the exact prefixed key. Placeholder styles cannot be mixed.
+The driver accepts SQLite's native anonymous (`?`), numbered (`?NNN`), and named (`:name`, `@name`, and `$name`) parameters, including mixed forms. Integer array keys are zero-based; string keys are passed to `SQLite3Stmt::bindValue()` unchanged. Parameters that PHP cannot bind by name can be bound by position.
 
 The driver accepts one SQL statement per operation. Empty SQL and multiple statements are rejected.
 

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Amp\Sync\Channel;
 use Fabpot\Amp\Sqlite\Internal\ProtocolError;
-use Fabpot\Amp\Sqlite\Internal\SqlScanner;
+use Fabpot\Amp\Sqlite\Internal\SqlStatementBoundary;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
@@ -160,8 +160,15 @@ return static function (Channel $channel): null {
 
             if ($request['operation'] === 'prepare') {
                 $statement = $database->prepare($request['sql']);
-                $consumedSql = $statement->getSQL();
-                if (SqlScanner::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
+                if (!$statement) {
+                    throw new RuntimeException('SQL must contain one statement');
+                }
+                try {
+                    $consumedSql = $statement->getSQL();
+                } catch (Error $error) {
+                    throw new RuntimeException('SQL must contain one statement', previous: $error);
+                }
+                if (SqlStatementBoundary::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
                     $statement->close();
                     throw new RuntimeException('Only one SQL statement may be prepared at a time');
                 }
@@ -234,10 +241,31 @@ return static function (Channel $channel): null {
                 $statement->clear();
             } else {
                 $statement = $database->prepare($request['sql']);
-                $consumedSql = $statement->getSQL();
-                if (SqlScanner::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
+                if (!$statement) {
+                    throw new RuntimeException('SQL must contain one statement');
+                }
+                try {
+                    $consumedSql = $statement->getSQL();
+                } catch (Error $error) {
+                    throw new RuntimeException('SQL must contain one statement', previous: $error);
+                }
+                if (SqlStatementBoundary::hasSecondStatement(substr($request['sql'], strlen($consumedSql)))) {
                     throw new RuntimeException('Only one SQL statement may be executed at a time');
                 }
+            }
+
+            /** @var bool $bindParameters */
+            $bindParameters = $request['bind_parameters'] ?? true;
+            if ($bindParameters === false && $statement->paramCount() > 0) {
+                throw new RuntimeException('Parameters are not allowed in direct queries');
+            }
+
+            if ($bindParameters && count($request['params']) !== $statement->paramCount()) {
+                throw new RuntimeException(sprintf(
+                    'Expected %d parameters, got %d',
+                    $statement->paramCount(),
+                    count($request['params']),
+                ));
             }
 
             foreach ($request['params'] as $key => $value) {
@@ -249,7 +277,9 @@ return static function (Channel $channel): null {
                     $value instanceof SqliteBlob => SQLITE3_BLOB,
                     default => SQLITE3_TEXT,
                 };
-                $statement->bindValue($position, $value instanceof SqliteBlob ? $value->getBytes() : $value, $type);
+                if (!$statement->bindValue($position, $value instanceof SqliteBlob ? $value->getBytes() : $value, $type)) {
+                    throw new RuntimeException("Invalid parameter '{$position}'");
+                }
             }
 
             $nativeResult = $statement->execute();
