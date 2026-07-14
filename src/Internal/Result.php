@@ -141,7 +141,17 @@ final class Result implements SqliteResult, \IteratorAggregate
             return;
         }
 
-        $batch = ($this->fetch)($this->resultId);
+        try {
+            $batch = ($this->fetch)($this->resultId);
+        } catch (\Throwable $exception) {
+            try {
+                $this->close();
+            } catch (\Throwable) {
+            }
+
+            throw $exception;
+        }
+
         $this->rows = $batch['rows'];
         $this->exhausted = $batch['exhausted'];
         if ($this->exhausted && $this->rows === []) {

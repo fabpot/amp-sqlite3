@@ -88,6 +88,33 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(['value' => 3], $future->await());
     }
 
+    public function testFetchErrorReleasesConnection(): void
+    {
+        $this->connection->query('CREATE TABLE fetch_errors (value INTEGER)');
+        foreach (\range(1, 5) as $value) {
+            $this->connection->execute('INSERT INTO fetch_errors VALUES (?)', [$value]);
+        }
+        $result = $this->connection->query(<<<'SQL'
+            SELECT CASE value
+                WHEN 5 THEN json_extract('invalid', '$')
+                ELSE value
+            END AS value
+            FROM fetch_errors
+            SQL);
+
+        self::assertSame(['value' => 1], $result->fetchRow());
+        self::assertSame(['value' => 2], $result->fetchRow());
+
+        try {
+            $result->fetchRow();
+            self::fail('Expected the later batch to fail');
+        } catch (SqliteQueryError) {
+        }
+
+        self::assertTrue($result->isClosed());
+        self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
+    }
+
     public function testClosingResultReleasesConnection(): void
     {
         $this->connection->query('CREATE TABLE numbers (value INTEGER)');
