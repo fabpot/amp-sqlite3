@@ -82,7 +82,26 @@ $reader->query('SELECT COUNT(*) FROM events');
 $transaction->commit();
 ```
 
-SQLite allows one writer per database at a time; concurrent writers wait up to the configured busy timeout. There is no built-in connection pool.
+SQLite allows one writer per database at a time; concurrent writers wait up to the configured busy timeout.
+
+### Connection pool
+
+`SqliteConnectionPool` manages a set of connections to one file database and dispatches queries to idle ones, so concurrent fibers do not wait for each other:
+
+```php
+use Fabpot\Amp\Sqlite\SqliteConnectionPool;
+
+$pool = new SqliteConnectionPool(new SqliteConfig($path), maxConnections: 10);
+
+$result = $pool->query('SELECT ...'); // runs on an idle connection
+$transaction = $pool->beginTransaction(); // owns its connection until committed or rolled back
+
+$pool->close();
+```
+
+The pool implements `SqliteConnection`, so it is a drop-in replacement for a single connection. Prepared statements created on the pool transparently re-prepare on whichever connection executes them. Idle connections are closed after `idleTimeout` seconds (60 by default).
+
+Pools reject `:memory:` databases, since every pooled connection would open a separate empty database. Keep `maxConnections` moderate: SQLite still allows only one writer at a time, so extra connections only help read concurrency.
 
 ## Queries
 
@@ -125,6 +144,7 @@ $insert = $connection->execute('INSERT INTO users (name) VALUES (?)', ['Alice'])
 $insert->getRowCount();     // changed rows, including trigger changes; 0 for DDL
 $insert->getLastInsertId(); // last inserted row ID
 $insert->getColumnCount();  // null for commands, column count for row-producing SQL
+$insert->getColumnNames();  // null for commands, list of column names for row-producing SQL
 ```
 
 An active row-producing result owns its connection until it is exhausted or closed. Close a result explicitly when abandoning unread rows:
