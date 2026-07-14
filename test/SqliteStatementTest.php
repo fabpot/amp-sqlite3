@@ -7,6 +7,7 @@ namespace Fabpot\Amp\Sqlite\Test;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteQueryError;
 use PHPUnit\Framework\TestCase;
 use Revolt\EventLoop;
 
@@ -47,6 +48,26 @@ final class SqliteStatementTest extends TestCase
 
         self::assertSame(['value' => 'first'], $statement->execute([':value' => 'first'])->fetchRow());
         self::assertSame(['value' => 'second'], $statement->execute([':value' => 'second'])->fetchRow());
+    }
+
+    public function testCanReuseStatementAfterExecutionError(): void
+    {
+        $this->connection->query('CREATE TABLE unique_values (value INTEGER UNIQUE)');
+        $statement = $this->connection->prepare('INSERT INTO unique_values VALUES (?)');
+        $statement->execute([1]);
+
+        try {
+            $statement->execute([1]);
+            self::fail('Expected the duplicate value to fail');
+        } catch (SqliteQueryError) {
+        }
+
+        $statement->execute([2]);
+
+        self::assertSame(
+            [['value' => 1], ['value' => 2]],
+            \iterator_to_array($this->connection->query('SELECT value FROM unique_values ORDER BY value')),
+        );
     }
 
     public function testCloseIsIdempotentAndPreventsExecution(): void

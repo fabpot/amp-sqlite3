@@ -307,8 +307,12 @@ return static function (Channel $channel): null {
                     throw new ProtocolError("Unknown statement ID '{$statementId}'");
                 }
                 $statement = $statements[$statementId];
-                $statement->reset();
                 $statement->clear();
+                try {
+                    $statement->reset();
+                } catch (Throwable) {
+                    $statement->reset();
+                }
             } else {
                 $statement = $database->prepare($request['sql']);
                 if (!$statement) {
