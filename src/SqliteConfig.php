@@ -198,16 +198,17 @@ final class SqliteConfig extends SqlConfig
 
     /**
      * Registers a custom SQL function implemented by a named PHP function or static method.
-     * The callable is registered in the child process, so it must be a string like
-     * 'strrev' or 'App\Sql\Functions::reverse'; closures are not supported.
+     * The callable is registered in the child process, so it must be a named function
+     * ('strrev') or a static method ([Functions::class, 'reverse']); closures are not supported.
+     *
+     * @param string|array{class-string, string} $callback
      */
-    public function withFunction(string $name, string $callback, int $argCount = -1, bool $deterministic = false): self
+    public function withFunction(string $name, string|array $callback, int $argCount = -1, bool $deterministic = false): self
     {
         self::validateCallableName($name);
-        self::validateCallable($callback);
 
         $config = clone $this;
-        $config->functions[\strtolower($name)] = ['callback' => $callback, 'arg_count' => $argCount, 'deterministic' => $deterministic];
+        $config->functions[\strtolower($name)] = ['callback' => self::normalizeCallable($callback), 'arg_count' => $argCount, 'deterministic' => $deterministic];
 
         return $config;
     }
@@ -220,15 +221,16 @@ final class SqliteConfig extends SqlConfig
 
     /**
      * Registers a custom aggregate implemented by named PHP functions or static methods.
+     *
+     * @param string|array{class-string, string} $stepCallback
+     * @param string|array{class-string, string} $finalCallback
      */
-    public function withAggregate(string $name, string $stepCallback, string $finalCallback, int $argCount = -1): self
+    public function withAggregate(string $name, string|array $stepCallback, string|array $finalCallback, int $argCount = -1): self
     {
         self::validateCallableName($name);
-        self::validateCallable($stepCallback);
-        self::validateCallable($finalCallback);
 
         $config = clone $this;
-        $config->aggregates[\strtolower($name)] = ['step' => $stepCallback, 'final' => $finalCallback, 'arg_count' => $argCount];
+        $config->aggregates[\strtolower($name)] = ['step' => self::normalizeCallable($stepCallback), 'final' => self::normalizeCallable($finalCallback), 'arg_count' => $argCount];
 
         return $config;
     }
@@ -241,14 +243,15 @@ final class SqliteConfig extends SqlConfig
 
     /**
      * Registers a custom collation implemented by a named PHP function or static method.
+     *
+     * @param string|array{class-string, string} $callback
      */
-    public function withCollation(string $name, string $callback): self
+    public function withCollation(string $name, string|array $callback): self
     {
         self::validateCallableName($name);
-        self::validateCallable($callback);
 
         $config = clone $this;
-        $config->collations[\strtolower($name)] = $callback;
+        $config->collations[\strtolower($name)] = self::normalizeCallable($callback);
 
         return $config;
     }
@@ -277,11 +280,24 @@ final class SqliteConfig extends SqlConfig
         }
     }
 
-    private static function validateCallable(string $callback): void
+    /**
+     * @param string|array{class-string, string} $callback
+     */
+    private static function normalizeCallable(string|array $callback): string
     {
+        if (\is_array($callback)) {
+            if (\count($callback) !== 2 || !\is_string($callback[0] ?? null) || !\is_string($callback[1] ?? null)) {
+                throw new \ValueError('Array callables must be [ClassName::class, \'methodName\'] pairs');
+            }
+
+            $callback = $callback[0] . '::' . $callback[1];
+        }
+
         if (!\is_callable($callback)) {
             throw new \ValueError("'{$callback}' is not a named function or public static method");
         }
+
+        return $callback;
     }
 
     private function validateModeCombination(): void

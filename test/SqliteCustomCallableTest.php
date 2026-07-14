@@ -30,7 +30,7 @@ final class SqliteCustomCallableTest extends TestCase
     public function testCustomStaticMethodFunction(): void
     {
         $config = (new SqliteConfig(':memory:'))
-            ->withFunction('slug', SqlCallables::class . '::slugify', argCount: 1);
+            ->withFunction('slug', [SqlCallables::class, 'slugify'], argCount: 1);
         $connection = (new SqliteConnector())->connect($config);
 
         try {
@@ -46,7 +46,7 @@ final class SqliteCustomCallableTest extends TestCase
     public function testCustomAggregate(): void
     {
         $config = (new SqliteConfig(':memory:'))
-            ->withAggregate('longest', SqlCallables::class . '::longestStep', SqlCallables::class . '::longestFinal', argCount: 1);
+            ->withAggregate('longest', [SqlCallables::class, 'longestStep'], [SqlCallables::class, 'longestFinal'], argCount: 1);
         $connection = (new SqliteConnector())->connect($config);
 
         try {
@@ -65,7 +65,7 @@ final class SqliteCustomCallableTest extends TestCase
     public function testCustomCollation(): void
     {
         $config = (new SqliteConfig(':memory:'))
-            ->withCollation('by_length', SqlCallables::class . '::compareByLength');
+            ->withCollation('by_length', [SqlCallables::class, 'compareByLength']);
         $connection = (new SqliteConnector())->connect($config);
 
         try {
@@ -92,9 +92,11 @@ final class SqliteCustomCallableTest extends TestCase
     public static function provideInvalidRegistrations(): iterable
     {
         yield 'unknown callback' => [static fn (SqliteConfig $c) => $c->withFunction('f', 'NonExistent::method')];
-        yield 'non-static method' => [static fn (SqliteConfig $c) => $c->withFunction('f', SqlCallables::class . '::instanceMethod')];
+        yield 'unknown array callback' => [static fn (SqliteConfig $c) => $c->withFunction('f', ['NonExistent', 'method'])];
+        yield 'non-static method' => [static fn (SqliteConfig $c) => $c->withFunction('f', [SqlCallables::class, 'instanceMethod'])];
+        yield 'malformed array callback' => [static fn (SqliteConfig $c) => $c->withFunction('f', ['strrev'])];
         yield 'invalid function name' => [static fn (SqliteConfig $c) => $c->withFunction('bad name!', 'strrev')];
         yield 'invalid collation name' => [static fn (SqliteConfig $c) => $c->withCollation('bad name!', 'strcmp')];
-        yield 'unknown aggregate step' => [static fn (SqliteConfig $c) => $c->withAggregate('a', 'NonExistent::step', 'strrev')];
+        yield 'unknown aggregate step' => [static fn (SqliteConfig $c) => $c->withAggregate('a', ['NonExistent', 'step'], 'strrev')];
     }
 }

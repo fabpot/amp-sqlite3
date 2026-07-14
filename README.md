@@ -224,7 +224,7 @@ A BLOB's length is fixed when opened; writing past that length fails. An open BL
 
 ## Custom functions, aggregates, and collations
 
-Register custom SQL callables on the configuration. Because they run in the child process, callbacks must be named functions or public static methods given as strings; closures are not supported:
+Register custom SQL callables on the configuration. Because they run in the child process, callbacks must be named functions (`'strrev'`) or public static methods (`[SqlFunctions::class, 'slugify']`); closures are not supported:
 
 ```php
 final class SqlFunctions
@@ -239,9 +239,9 @@ final class SqlFunctions
 }
 
 $config = (new SqliteConfig($path))
-    ->withFunction('slug', SqlFunctions::class . '::slugify', argCount: 1, deterministic: true)
-    ->withAggregate('longest', SqlFunctions::class . '::longestStep', SqlFunctions::class . '::longestFinal', argCount: 1)
-    ->withCollation('natural', SqlFunctions::class . '::compareNaturally');
+    ->withFunction('slug', [SqlFunctions::class, 'slugify'], argCount: 1, deterministic: true)
+    ->withAggregate('longest', [SqlFunctions::class, 'longestStep'], [SqlFunctions::class, 'longestFinal'], argCount: 1)
+    ->withCollation('natural', [SqlFunctions::class, 'compareNaturally']);
 
 $connection = (new SqliteConnector())->connect($config);
 
