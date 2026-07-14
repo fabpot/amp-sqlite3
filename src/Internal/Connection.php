@@ -227,11 +227,7 @@ final class Connection implements SqliteConnection
     public function executeControl(string $sql): void
     {
         $this->awaitTransactionResource();
-        $value = $this->request('execute', $sql, [
-            'sql' => $sql,
-            'params' => [],
-            'bind_parameters' => true,
-        ]);
+        $value = $this->request('execute', $sql, ['sql' => $sql, 'params' => []]);
         if ($value['result_id'] !== null) {
             $this->requestResult('closeResult', $value['result_id'], $sql);
         }
