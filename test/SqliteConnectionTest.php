@@ -77,6 +77,15 @@ final class SqliteConnectionTest extends TestCase
         self::assertSame('z:/database.sqlite', \Fabpot\Amp\Sqlite\Internal\Path::resolve('z:/database.sqlite'));
     }
 
+    public function testResolvesEmptyAndNullPaths(): void
+    {
+        $workingDirectory = \getcwd();
+        self::assertIsString($workingDirectory);
+
+        self::assertSame($workingDirectory . \DIRECTORY_SEPARATOR, \Fabpot\Amp\Sqlite\Internal\Path::resolve(''));
+        self::assertSame($workingDirectory . \DIRECTORY_SEPARATOR, \Fabpot\Amp\Sqlite\Internal\Path::resolve(null));
+    }
+
     public function testRejectsNonSqliteConfig(): void
     {
         $config = new class('', 0) extends SqlConfig {

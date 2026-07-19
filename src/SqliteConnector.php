@@ -40,18 +40,14 @@ final class SqliteConnector implements SqlConnector
         if (!$config instanceof SqliteConfig) {
             throw new \TypeError('SqliteConnector expects an instance of SqliteConfig');
         }
-
+        SqliteConfig::validatePath($config->getDatabase());
         if ($config->getHost() !== '' || $config->getPort() !== 0 || $config->getUser() !== null || $config->getPassword() !== null) {
             throw new \ValueError('SQLite configurations cannot contain server connection settings');
         }
-
-        SqliteConfig::validatePath($config->getDatabase());
         if ($config->getOpenMode() === SqliteOpenMode::ReadOnly && $config->getSynchronousMode() !== SqliteSynchronousMode::Automatic) {
             throw new \ValueError('An explicit synchronous mode cannot be used with a read-only database');
         }
-        /** @var string $database */
-        $database = $config->getDatabase();
-        $path = Path::resolve($database);
+        $path = Path::resolve($config->getDatabase());
         $context = null;
 
         try {

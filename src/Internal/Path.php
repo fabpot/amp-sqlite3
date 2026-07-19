@@ -18,8 +18,10 @@ use Fabpot\Amp\Sqlite\SqliteConnectionException;
 /** @internal */
 final class Path
 {
-    public static function resolve(string $path): string
+    public static function resolve(?string $path): string
     {
+        $path = (string) $path;
+
         if ($path === ':memory:' || self::isAbsolute($path)) {
             return $path;
         }
@@ -34,6 +36,6 @@ final class Path
 
     private static function isAbsolute(string $path): bool
     {
-        return $path[0] === '/' || $path[0] === '\\' || (isset($path[2]) && (('A' <= $path[0] && $path[0] <= 'Z') || ('a' <= $path[0] && $path[0] <= 'z')) && $path[1] === ':');
+        return isset($path[0]) && ($path[0] === '/' || $path[0] === '\\' || (isset($path[2]) && (('A' <= $path[0] && $path[0] <= 'Z') || ('a' <= $path[0] && $path[0] <= 'z')) && $path[1] === ':'));
     }
 }
