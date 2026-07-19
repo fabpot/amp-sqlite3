@@ -117,7 +117,7 @@ final class SqliteConfig extends SqlConfig
     public function withBusyTimeout(int $busyTimeout): self
     {
         if ($busyTimeout < 0) {
-            throw new \ValueError('Busy timeout must not be negative');
+            throw new \InvalidArgumentException('Busy timeout must not be negative');
         }
 
         $config = clone $this;
@@ -147,7 +147,7 @@ final class SqliteConfig extends SqlConfig
     public function withBatchSize(int $batchSize): self
     {
         if ($batchSize < 1) {
-            throw new \ValueError('Batch size must be greater than zero');
+            throw new \InvalidArgumentException('Batch size must be greater than zero');
         }
 
         $config = clone $this;
@@ -185,12 +185,12 @@ final class SqliteConfig extends SqlConfig
     public function withPragma(string $name, #[\SensitiveParameter] null|bool|int|float|string $value): self
     {
         if (!\preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name)) {
-            throw new \ValueError("Invalid pragma name '{$name}'");
+            throw new \InvalidArgumentException("Invalid pragma name '{$name}'");
         }
 
         $name = \strtolower($name);
         if (isset(self::RESERVED_PRAGMAS[$name])) {
-            throw new \ValueError("Pragma '{$name}' has a dedicated configuration option");
+            throw new \InvalidArgumentException("Pragma '{$name}' has a dedicated configuration option");
         }
 
         $config = clone $this;
@@ -276,25 +276,25 @@ final class SqliteConfig extends SqlConfig
     public static function validatePath(?string $path): void
     {
         if ($path === null || $path === '') {
-            throw new \ValueError('SQLite database path must not be empty');
+            throw new \InvalidArgumentException('SQLite database path must not be empty');
         }
 
         if (\strncasecmp($path, 'file:', 5) === 0) {
-            throw new \ValueError('SQLite URI filenames are not supported');
+            throw new \InvalidArgumentException('SQLite URI filenames are not supported');
         }
     }
 
     private static function validateCallableName(string $name): void
     {
         if (!\preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name)) {
-            throw new \ValueError("Invalid SQL function or collation name '{$name}'");
+            throw new \InvalidArgumentException("Invalid SQL function or collation name '{$name}'");
         }
     }
 
     private static function validateArgumentCount(int $argCount): void
     {
         if ($argCount < -1) {
-            throw new \ValueError('Argument count must be -1 or greater');
+            throw new \InvalidArgumentException('Argument count must be -1 or greater');
         }
     }
 
@@ -305,14 +305,14 @@ final class SqliteConfig extends SqlConfig
     {
         if (\is_array($callback)) {
             if (\count($callback) !== 2 || !\is_string($callback[0] ?? null) || !\is_string($callback[1] ?? null)) {
-                throw new \ValueError('Array callables must be [ClassName::class, \'methodName\'] pairs');
+                throw new \InvalidArgumentException('Array callables must be [ClassName::class, \'methodName\'] pairs');
             }
 
             $callback = $callback[0] . '::' . $callback[1];
         }
 
         if (!\is_callable($callback)) {
-            throw new \ValueError("'{$callback}' is not a named function or public static method");
+            throw new \InvalidArgumentException("'{$callback}' is not a named function or public static method");
         }
 
         return $callback;

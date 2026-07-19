@@ -91,7 +91,7 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
         }
 
         if (\strlen($bytes) > $this->length - $this->position) {
-            throw new \ValueError('Writing these bytes would exceed the SQLite BLOB length');
+            throw new \InvalidArgumentException('Writing these bytes would exceed the SQLite BLOB length');
         }
 
         ($this->write)($bytes);

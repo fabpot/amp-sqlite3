@@ -25,7 +25,7 @@ final class SqliteConfigTest extends TestCase
     #[DataProvider('provideInvalidPaths')]
     public function testRejectsInvalidPath(string $path): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         new SqliteConfig($path);
     }
@@ -40,7 +40,7 @@ final class SqliteConfigTest extends TestCase
     #[DataProvider('provideInvalidBusyTimeouts')]
     public function testRejectsNegativeBusyTimeout(int $busyTimeout): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConfig(':memory:'))->withBusyTimeout($busyTimeout);
     }
@@ -54,7 +54,7 @@ final class SqliteConfigTest extends TestCase
     #[DataProvider('provideInvalidBatchSizes')]
     public function testRejectsInvalidBatchSize(int $batchSize): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConfig(':memory:'))->withBatchSize($batchSize);
     }
@@ -68,7 +68,7 @@ final class SqliteConfigTest extends TestCase
     #[DataProvider('provideInvalidPragmaNames')]
     public function testRejectsInvalidPragmaName(string $name): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConfig(':memory:'))->withPragma($name, 1);
     }
@@ -84,7 +84,7 @@ final class SqliteConfigTest extends TestCase
     #[DataProvider('provideReservedPragmaNames')]
     public function testRejectsReservedPragma(string $name): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConfig(':memory:'))->withPragma($name, 1);
     }

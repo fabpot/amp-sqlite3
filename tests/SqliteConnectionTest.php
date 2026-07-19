@@ -105,7 +105,7 @@ final class SqliteConnectionTest extends TestCase
 
     public function testRevalidatesInheritedDatabaseMutation(): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConnector())->connect((new SqliteConfig(':memory:'))->withDatabase('file:database.sqlite'));
     }

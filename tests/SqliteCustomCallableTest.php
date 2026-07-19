@@ -93,7 +93,7 @@ final class SqliteCustomCallableTest extends TestCase
     #[DataProvider('provideInvalidRegistrations')]
     public function testRejectsInvalidRegistrations(\Closure $register): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         $register(new SqliteConfig(':memory:'));
     }

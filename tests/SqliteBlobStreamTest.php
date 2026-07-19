@@ -94,7 +94,7 @@ final class SqliteBlobStreamTest extends TestCase
         $this->connection->query('INSERT INTO files VALUES (zeroblob(2))');
         $blob = $this->connection->openBlob('files', 'contents', 1, mode: SqliteBlobMode::ReadWrite);
 
-        $this->expectException(\ValueError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         $blob->write('abc');
     }
