@@ -8,7 +8,7 @@
 >
     <testsuites>
         <testsuite name="AMPHP SQLite">
-            <directory>test</directory>
+            <directory>tests</directory>
         </testsuite>
     </testsuites>
     <source>
