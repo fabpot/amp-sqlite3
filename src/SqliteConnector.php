@@ -18,7 +18,6 @@ use Amp\Parallel\Context\ContextFactory;
 use Amp\Parallel\Context\ProcessContext;
 use Amp\Parallel\Context\ProcessContextFactory;
 use Amp\Sql\SqlConfig;
-use Amp\Sql\SqlConnection;
 use Amp\Sql\SqlConnector;
 use Fabpot\Amp\Sqlite\Internal\Connection;
 use Fabpot\Amp\Sqlite\Internal\Path;
@@ -33,7 +32,7 @@ final class SqliteConnector implements SqlConnector
     ) {
     }
 
-    public function connect(SqlConfig $config, ?Cancellation $cancellation = null): SqlConnection
+    public function connect(SqlConfig $config, ?Cancellation $cancellation = null): SqliteConnection
     {
         if (!$config instanceof SqliteConfig) {
             throw new \TypeError('SqliteConnector expects an instance of SqliteConfig');

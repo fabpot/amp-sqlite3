@@ -15,6 +15,7 @@ namespace Fabpot\Amp\Sqlite\Test;
 
 use Amp\Sql\SqlTransactionIsolationLevel;
 use Fabpot\Amp\Sqlite\SqliteConfig;
+use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
@@ -23,8 +24,7 @@ use function Amp\delay;
 
 final class SqliteTransactionTest extends TestCase
 {
-    /** @var \Fabpot\Amp\Sqlite\SqliteConnection */
-    private $connection;
+    private SqliteConnection $connection;
 
     protected function setUp(): void
     {
