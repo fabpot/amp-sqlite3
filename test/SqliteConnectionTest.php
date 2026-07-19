@@ -71,6 +71,12 @@ final class SqliteConnectionTest extends TestCase
         }
     }
 
+    public function testRecognizesWindowsAbsolutePaths(): void
+    {
+        self::assertSame('C:\\database.sqlite', \Fabpot\Amp\Sqlite\Internal\Path::resolve('C:\\database.sqlite'));
+        self::assertSame('z:/database.sqlite', \Fabpot\Amp\Sqlite\Internal\Path::resolve('z:/database.sqlite'));
+    }
+
     public function testRejectsNonSqliteConfig(): void
     {
         $config = new class('', 0) extends SqlConfig {

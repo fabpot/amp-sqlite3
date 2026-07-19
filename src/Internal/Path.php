@@ -34,6 +34,6 @@ final class Path
 
     private static function isAbsolute(string $path): bool
     {
-        return $path[0] === '/' || $path[0] === '\\' || (isset($path[2]) && \ctype_alpha($path[0]) && $path[1] === ':');
+        return $path[0] === '/' || $path[0] === '\\' || (isset($path[2]) && (('A' <= $path[0] && $path[0] <= 'Z') || ('a' <= $path[0] && $path[0] <= 'z')) && $path[1] === ':');
     }
 }
