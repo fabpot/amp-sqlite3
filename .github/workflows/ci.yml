@@ -22,6 +22,18 @@ jobs:
       - run: composer install --no-interaction --prefer-dist
       - run: composer test
 
+  lowest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: sqlite3
+          coverage: none
+      - run: composer update --no-interaction --prefer-dist --prefer-lowest --prefer-stable
+      - run: composer test
+
   quality:
     runs-on: ubuntu-24.04
     steps:
