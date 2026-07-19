@@ -32,6 +32,9 @@ final class SqliteConnector implements SqlConnector
     ) {
     }
 
+    /**
+     * @param SqliteConfig $config
+     */
     public function connect(SqlConfig $config, ?Cancellation $cancellation = null): SqliteConnection
     {
         if (!$config instanceof SqliteConfig) {
