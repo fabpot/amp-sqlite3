@@ -42,10 +42,10 @@ final class SqliteConnector implements SqlConnector
         }
         SqliteConfig::validatePath($config->getDatabase());
         if ($config->getHost() !== '' || $config->getPort() !== 0 || $config->getUser() !== null || $config->getPassword() !== null) {
-            throw new \ValueError('SQLite configurations cannot contain server connection settings');
+            throw new \RuntimeException('SQLite configurations cannot contain server connection settings');
         }
         if ($config->getOpenMode() === SqliteOpenMode::ReadOnly && $config->getSynchronousMode() !== SqliteSynchronousMode::Automatic) {
-            throw new \ValueError('An explicit synchronous mode cannot be used with a read-only database');
+            throw new \RuntimeException('An explicit synchronous mode cannot be used with a read-only database');
         }
         $path = Path::resolve($config->getDatabase());
         $context = null;
@@ -55,7 +55,7 @@ final class SqliteConnector implements SqlConnector
             if (!$context instanceof ProcessContext) {
                 $context->close();
 
-                throw new \ValueError('SQLite connections require process isolation');
+                throw new \RuntimeException('SQLite connections require process isolation');
             }
 
             $context->send([
@@ -78,7 +78,7 @@ final class SqliteConnector implements SqlConnector
             if (($ready['ready'] ?? false) !== true) {
                 throw new SqliteConnectionException('The SQLite child process sent an invalid startup response');
             }
-        } catch (\ValueError $exception) {
+        } catch (\RuntimeException $exception) {
             throw $exception;
         } catch (\Throwable $exception) {
             $context?->close();

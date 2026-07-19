@@ -98,7 +98,7 @@ final class SqliteConnectionTest extends TestCase
 
     public function testRejectsInheritedServerConfiguration(): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\RuntimeException::class);
 
         (new SqliteConnector())->connect((new SqliteConfig(':memory:'))->withHost('localhost'));
     }

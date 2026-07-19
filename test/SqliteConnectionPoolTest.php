@@ -44,7 +44,7 @@ final class SqliteConnectionPoolTest extends TestCase
 
     public function testRejectsMemoryDatabases(): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\RuntimeException::class);
 
         new SqliteConnectionPool(new SqliteConfig(':memory:'));
     }

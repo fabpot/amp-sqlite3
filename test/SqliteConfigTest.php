@@ -107,7 +107,7 @@ final class SqliteConfigTest extends TestCase
 
     public function testRejectsWalForReadOnlyConnections(): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\RuntimeException::class);
 
         (new SqliteConfig('database.sqlite'))
             ->withOpenMode(SqliteOpenMode::ReadOnly)
@@ -116,7 +116,7 @@ final class SqliteConfigTest extends TestCase
 
     public function testRejectsReadOnlyConnectionsWhenWalWasSelectedFirst(): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\RuntimeException::class);
 
         (new SqliteConfig('database.sqlite'))
             ->withJournalMode(SqliteJournalMode::Wal)
@@ -125,7 +125,7 @@ final class SqliteConfigTest extends TestCase
 
     public function testRejectsExplicitSynchronousModeForReadOnlyConnections(): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\RuntimeException::class);
 
         (new SqliteConfig('database.sqlite'))
             ->withOpenMode(SqliteOpenMode::ReadOnly)

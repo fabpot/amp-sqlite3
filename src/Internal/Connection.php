@@ -284,7 +284,7 @@ final class Connection implements SqliteConnection
     {
         SqliteConfig::validatePath($path);
         if ($path === ':memory:') {
-            throw new \ValueError('Backup and restore require a file path');
+            throw new \RuntimeException('Backup and restore require a file path');
         }
 
         $this->assertOpen();

@@ -321,11 +321,11 @@ final class SqliteConfig extends SqlConfig
     private function validateModeCombination(): void
     {
         if ($this->openMode === SqliteOpenMode::ReadOnly && $this->journalMode !== SqliteJournalMode::Automatic) {
-            throw new \ValueError('An explicit journal mode cannot be used with a read-only database');
+            throw new \RuntimeException('An explicit journal mode cannot be used with a read-only database');
         }
 
         if ($this->openMode === SqliteOpenMode::ReadOnly && $this->synchronousMode !== SqliteSynchronousMode::Automatic) {
-            throw new \ValueError('An explicit synchronous mode cannot be used with a read-only database');
+            throw new \RuntimeException('An explicit synchronous mode cannot be used with a read-only database');
         }
     }
 }

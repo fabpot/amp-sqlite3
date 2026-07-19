@@ -110,7 +110,7 @@ final class SqliteBackupTest extends TestCase
 
     public function testRejectsMemoryPath(): void
     {
-        $this->expectException(\ValueError::class);
+        $this->expectException(\RuntimeException::class);
 
         $this->connection->backup(':memory:');
     }

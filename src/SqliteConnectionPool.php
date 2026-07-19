@@ -44,7 +44,7 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
         ?SqliteTransactionMode $transactionIsolation = null,
     ) {
         if ($config->getDatabase() === ':memory:') {
-            throw new \ValueError('Connection pools cannot use :memory: databases, as every pooled connection would open a separate database');
+            throw new \RuntimeException('Connection pools cannot use :memory: databases, as every pooled connection would open a separate database');
         }
 
         parent::__construct(
