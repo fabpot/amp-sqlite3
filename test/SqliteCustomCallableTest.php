@@ -105,7 +105,9 @@ final class SqliteCustomCallableTest extends TestCase
         yield 'non-static method' => [static fn (SqliteConfig $c) => $c->withFunction('f', [SqlCallables::class, 'instanceMethod'])];
         yield 'malformed array callback' => [static fn (SqliteConfig $c) => $c->withFunction('f', ['strrev'])];
         yield 'invalid function name' => [static fn (SqliteConfig $c) => $c->withFunction('bad name!', 'strrev')];
+        yield 'invalid function argument count' => [static fn (SqliteConfig $c) => $c->withFunction('f', 'strrev', -2)];
         yield 'invalid collation name' => [static fn (SqliteConfig $c) => $c->withCollation('bad name!', 'strcmp')];
         yield 'unknown aggregate step' => [static fn (SqliteConfig $c) => $c->withAggregate('a', ['NonExistent', 'step'], 'strrev')];
+        yield 'invalid aggregate argument count' => [static fn (SqliteConfig $c) => $c->withAggregate('a', 'strrev', 'strrev', -2)];
     }
 }

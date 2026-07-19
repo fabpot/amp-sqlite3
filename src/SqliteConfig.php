@@ -215,6 +215,7 @@ final class SqliteConfig extends SqlConfig
     public function withFunction(string $name, string|array $callback, int $argCount = -1, bool $deterministic = false): self
     {
         self::validateCallableName($name);
+        self::validateArgumentCount($argCount);
 
         $config = clone $this;
         $config->functions[\strtolower($name)] = ['callback' => self::normalizeCallable($callback), 'arg_count' => $argCount, 'deterministic' => $deterministic];
@@ -237,6 +238,7 @@ final class SqliteConfig extends SqlConfig
     public function withAggregate(string $name, string|array $stepCallback, string|array $finalCallback, int $argCount = -1): self
     {
         self::validateCallableName($name);
+        self::validateArgumentCount($argCount);
 
         $config = clone $this;
         $config->aggregates[\strtolower($name)] = ['step' => self::normalizeCallable($stepCallback), 'final' => self::normalizeCallable($finalCallback), 'arg_count' => $argCount];
@@ -286,6 +288,13 @@ final class SqliteConfig extends SqlConfig
     {
         if (!\preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name)) {
             throw new \ValueError("Invalid SQL function or collation name '{$name}'");
+        }
+    }
+
+    private static function validateArgumentCount(int $argCount): void
+    {
+        if ($argCount < -1) {
+            throw new \ValueError('Argument count must be -1 or greater');
         }
     }
 
