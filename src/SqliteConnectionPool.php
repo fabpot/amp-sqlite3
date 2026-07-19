@@ -18,6 +18,7 @@ use Amp\Sql\SqlConnector;
 use Amp\Sql\SqlResult;
 use Amp\Sql\SqlStatement;
 use Amp\Sql\SqlTransaction;
+use Amp\Sql\SqlTransactionIsolation;
 use Fabpot\Amp\Sqlite\Internal\PooledResult;
 use Fabpot\Amp\Sqlite\Internal\PooledStatement;
 use Fabpot\Amp\Sqlite\Internal\PooledTransaction;
@@ -40,7 +41,7 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
         int $maxConnections = self::DEFAULT_MAX_CONNECTIONS,
         int $idleTimeout = self::DEFAULT_IDLE_TIMEOUT,
         ?SqlConnector $connector = null,
-        SqliteTransactionMode $transactionIsolation = SqliteTransactionMode::Deferred,
+        ?SqliteTransactionMode $transactionIsolation = null,
     ) {
         if ($config->getDatabase() === ':memory:') {
             throw new \ValueError('Connection pools cannot use :memory: databases, as every pooled connection would open a separate database');
@@ -51,8 +52,23 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
             connector: $connector ?? new SqliteConnector(),
             maxConnections: $maxConnections,
             idleTimeout: $idleTimeout,
-            transactionIsolation: $transactionIsolation,
+            transactionIsolation: $transactionIsolation ?? $config->getTransactionMode(),
         );
+    }
+
+    public function getTransactionIsolation(): SqliteTransactionMode
+    {
+        /** @var SqliteTransactionMode */
+        return parent::getTransactionIsolation();
+    }
+
+    public function setTransactionIsolation(SqlTransactionIsolation $isolation): void
+    {
+        if (!$isolation instanceof SqliteTransactionMode) {
+            throw new \TypeError('SQLite connection pools only accept SqliteTransactionMode');
+        }
+
+        parent::setTransactionIsolation($isolation);
     }
 
     public function getConfig(): SqliteConfig

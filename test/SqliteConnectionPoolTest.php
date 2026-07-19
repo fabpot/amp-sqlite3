@@ -13,9 +13,11 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
+use Amp\Sql\SqlTransactionIsolationLevel;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnectionPool;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
+use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 use function Amp\delay;
@@ -45,6 +47,44 @@ final class SqliteConnectionPoolTest extends TestCase
         $this->expectException(\ValueError::class);
 
         new SqliteConnectionPool(new SqliteConfig(':memory:'));
+    }
+
+    public function testUsesConfiguredTransactionModeByDefault(): void
+    {
+        $pool = new SqliteConnectionPool(
+            (new SqliteConfig($this->path))->withTransactionMode(SqliteTransactionMode::Immediate),
+        );
+
+        try {
+            $transaction = $pool->beginTransaction();
+            self::assertSame(SqliteTransactionMode::Immediate, $transaction->getIsolation());
+            $transaction->rollback();
+        } finally {
+            $pool->close();
+        }
+    }
+
+    public function testExplicitTransactionModeOverridesConfig(): void
+    {
+        $pool = new SqliteConnectionPool(
+            (new SqliteConfig($this->path))->withTransactionMode(SqliteTransactionMode::Immediate),
+            transactionIsolation: SqliteTransactionMode::Exclusive,
+        );
+
+        try {
+            $transaction = $pool->beginTransaction();
+            self::assertSame(SqliteTransactionMode::Exclusive, $transaction->getIsolation());
+            $transaction->rollback();
+        } finally {
+            $pool->close();
+        }
+    }
+
+    public function testRejectsGenericIsolationLevel(): void
+    {
+        $this->expectException(\TypeError::class);
+
+        $this->pool->setTransactionIsolation(SqlTransactionIsolationLevel::Serializable);
     }
 
     public function testQueriesRunOnPooledConnections(): void
