@@ -13,11 +13,21 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
+use Fabpot\Amp\Sqlite\SqliteExceptionInterface;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
+use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use PHPUnit\Framework\TestCase;
 
 final class SqliteQueryErrorTest extends TestCase
 {
+    public function testAllPackageErrorsImplementExceptionInterface(): void
+    {
+        self::assertInstanceOf(SqliteExceptionInterface::class, new SqliteConnectionException());
+        self::assertInstanceOf(SqliteExceptionInterface::class, new SqliteQueryError('Query failed'));
+        self::assertInstanceOf(SqliteExceptionInterface::class, new SqliteTransactionError());
+    }
+
     public function testExposesSQLiteCodesWithoutIncludingParameters(): void
     {
         $error = new SqliteQueryError(

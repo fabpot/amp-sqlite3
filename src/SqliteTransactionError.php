@@ -15,6 +15,6 @@ namespace Fabpot\Amp\Sqlite;
 
 use Amp\Sql\SqlTransactionError;
 
-class SqliteTransactionError extends SqlTransactionError
+class SqliteTransactionError extends SqlTransactionError implements SqliteExceptionInterface
 {
 }

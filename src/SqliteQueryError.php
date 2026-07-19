@@ -15,7 +15,7 @@ namespace Fabpot\Amp\Sqlite;
 
 use Amp\Sql\SqlQueryError;
 
-class SqliteQueryError extends SqlQueryError
+class SqliteQueryError extends SqlQueryError implements SqliteExceptionInterface
 {
     public function __construct(
         string $message,

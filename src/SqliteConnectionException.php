@@ -15,6 +15,6 @@ namespace Fabpot\Amp\Sqlite;
 
 use Amp\Sql\SqlConnectionException;
 
-class SqliteConnectionException extends SqlConnectionException
+class SqliteConnectionException extends SqlConnectionException implements SqliteExceptionInterface
 {
 }

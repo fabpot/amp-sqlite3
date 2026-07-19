@@ -29,10 +29,5 @@
                 <directory name="src"/>
             </errorLevel>
         </MissingOverrideAttribute>
-        <UnusedClass>
-            <errorLevel type="suppress">
-                <directory name="src"/>
-            </errorLevel>
-        </UnusedClass>
     </issueHandlers>
 </psalm>
