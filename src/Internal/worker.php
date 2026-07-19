@@ -11,9 +11,9 @@ declare(strict_types=1);
  * file that was distributed with this source code.
  */
 
+namespace Fabpot\Amp\Sqlite\Internal;
+
 use Amp\Sync\Channel;
-use Fabpot\Amp\Sqlite\Internal\ProtocolError;
-use Fabpot\Amp\Sqlite\Internal\WorkerProcess;
 
 return static function (Channel $channel): null {
     /** @var array<string, mixed> $open */
@@ -39,7 +39,7 @@ return static function (Channel $channel): null {
             ]);
 
             break;
-        } catch (SQLite3Exception $exception) {
+        } catch (\SQLite3Exception $exception) {
             $channel->send([
                 'id' => $request['id'],
                 'query_error' => [
@@ -48,7 +48,7 @@ return static function (Channel $channel): null {
                     'extended_code' => $worker->getLastExtendedErrorCode(),
                 ],
             ]);
-        } catch (Throwable $exception) {
+        } catch (\Throwable $exception) {
             $channel->send([
                 'id' => $request['id'],
                 'query_error' => [

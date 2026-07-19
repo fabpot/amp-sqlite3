@@ -23,6 +23,7 @@ use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use Revolt\EventLoop;
 
+/** @internal */
 final class PooledTransaction implements SqliteTransaction
 {
     use ForbidCloning;

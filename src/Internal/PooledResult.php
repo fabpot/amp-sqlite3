@@ -19,6 +19,8 @@ use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteResult;
 
 /**
+ * @internal
+ *
  * @extends SqlPooledResult<null|bool|int|float|string|SqliteBlob, SqliteResult>
  */
 final class PooledResult extends SqlPooledResult implements SqliteResult

@@ -20,7 +20,11 @@ use Amp\Sync\Lock;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteResult;
 
-/** @implements \IteratorAggregate<int, array<string, null|bool|int|float|string|SqliteBlob>> */
+/**
+ * @internal
+ *
+ * @implements \IteratorAggregate<int, array<string, null|bool|int|float|string|SqliteBlob>>
+ */
 final class Result implements SqliteResult, \IteratorAggregate
 {
     use ForbidCloning;

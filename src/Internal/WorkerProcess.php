@@ -21,6 +21,8 @@ use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
 
 /**
  * Runs inside the child process and executes protocol operations against the native SQLite3 connection.
+ *
+ * @internal
  */
 final class WorkerProcess
 {

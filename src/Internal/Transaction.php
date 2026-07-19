@@ -24,6 +24,7 @@ use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 
+/** @internal */
 final class Transaction implements SqliteTransaction
 {
     use ForbidCloning;

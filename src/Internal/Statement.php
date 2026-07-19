@@ -19,6 +19,7 @@ use Amp\ForbidSerialization;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 
+/** @internal */
 final class Statement implements SqliteStatement
 {
     use ForbidCloning;

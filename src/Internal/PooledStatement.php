@@ -20,6 +20,7 @@ use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 use Revolt\EventLoop;
 
+/** @internal */
 final class PooledStatement implements SqliteStatement
 {
     use ForbidCloning;

@@ -10,6 +10,8 @@ composer require fabpot/amphp-sqlite3
 
 PHP 8.4 or newer, `ext-sqlite3`, and SQLite 3.31.0 or newer are required.
 
+Classes in the `Fabpot\Amp\Sqlite\Internal` namespace are not part of the public API and may change without notice.
+
 ## Connecting
 
 ```php

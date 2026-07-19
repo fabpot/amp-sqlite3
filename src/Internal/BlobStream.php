@@ -22,7 +22,11 @@ use Amp\ForbidSerialization;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteBlobStream;
 
-/** @implements \IteratorAggregate<int, string> */
+/**
+ * @internal
+ *
+ * @implements \IteratorAggregate<int, string>
+ */
 final class BlobStream implements SqliteBlobStream, \IteratorAggregate
 {
     use ForbidCloning;

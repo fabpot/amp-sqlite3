@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Internal;
 
+/** @internal */
 final class SqlStatementBoundary
 {
     public static function hasSecondStatement(string $remainder): bool
