@@ -63,6 +63,8 @@ $config = (new SqliteConfig(__DIR__ . '/database.sqlite'))
 
 `SqliteConfig` is immutable; every `with*()` method returns a new instance. Invalid combinations (e.g. an explicit journal mode on a read-only database) are rejected. Pragmas with a dedicated option (`journal_mode`, `synchronous`, `foreign_keys`, `busy_timeout`, `trusted_schema`) cannot be set through `withPragma()`.
 
+Connection pools use the configured transaction mode by default. Pass `transactionIsolation` to the pool constructor or call `setTransactionIsolation()` to override it.
+
 Relative paths are resolved against the current working directory of the parent process. SQLite URI filenames (`file:...`) are not supported.
 
 To customize how the child process is started, inject an `Amp\Parallel\Context\ContextFactory` into `SqliteConnector`. The factory must create process contexts.
@@ -324,6 +326,6 @@ try {
 - `SqliteQueryError`: SQL preparation and execution failures, with SQLite result codes.
 - `SqliteConnectionException`: startup, IPC, and unexpected child-process failures.
 - `SqliteTransactionError`: operations on finished transactions.
-- All extend the corresponding `Amp\Sql` exceptions.
+- All implement `SqliteExceptionInterface` and extend the corresponding `Amp\Sql` errors or exceptions.
 
 Exception messages and traces never contain bound parameter values.
