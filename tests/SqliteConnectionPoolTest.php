@@ -249,6 +249,30 @@ final class SqliteConnectionPoolTest extends TestCase
         }
     }
 
+    public function testClosingPreparedStatementWithActiveResultReleasesConnectionAfterResultCloses(): void
+    {
+        $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize(1), maxConnections: 1);
+        $result = null;
+
+        try {
+            $pool->query("INSERT INTO entries VALUES ('first'), ('second')");
+            $statement = $pool->prepare('SELECT value FROM entries ORDER BY value');
+            $result = $statement->execute();
+            self::assertSame(['value' => 'first'], $result->fetchRow());
+
+            $statement->close();
+            $query = async(fn () => $pool->query('SELECT 42 AS answer'));
+            delay(0.05);
+            self::assertFalse($query->isComplete());
+
+            $result->close();
+            self::assertSame(['answer' => 42], $query->await()->fetchRow());
+        } finally {
+            $result?->close();
+            $pool->close();
+        }
+    }
+
     public function testOpenBlobReleasesConnectionOnClose(): void
     {
         $rowId = $this->pool->query('INSERT INTO entries VALUES (zeroblob(3))')->getLastInsertId();
