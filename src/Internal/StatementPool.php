@@ -84,7 +84,9 @@ final class StatementPool implements SqliteStatement
             throw $exception;
         }
 
-        return new PooledResult($result, fn () => $this->push($statement));
+        $result->onClose(fn () => $this->push($statement));
+
+        return $result;
     }
 
     public function getQuery(): string
@@ -99,8 +101,13 @@ final class StatementPool implements SqliteStatement
 
     public function close(): void
     {
-        if (!$this->onClose->isComplete()) {
-            $this->onClose->complete();
+        if ($this->onClose->isComplete()) {
+            return;
+        }
+
+        $this->onClose->complete();
+        while (!$this->statements->isEmpty()) {
+            $this->statements->dequeue()->close();
         }
     }
 
@@ -117,11 +124,12 @@ final class StatementPool implements SqliteStatement
     private function push(SqliteStatement $statement): void
     {
         $maxConnections = $this->pool->getConnectionLimit();
-        if ($this->statements->count() > $maxConnections / 10) {
-            return;
-        }
+        if ($this->isClosed()
+            || $this->statements->count() > $maxConnections / 10
+            || ($maxConnections === $this->pool->getConnectionCount() && $this->pool->getIdleConnectionCount() === 0)
+        ) {
+            $statement->close();
 
-        if ($maxConnections === $this->pool->getConnectionCount() && $this->pool->getIdleConnectionCount() === 0) {
             return;
         }
 
