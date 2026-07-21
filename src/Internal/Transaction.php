@@ -16,6 +16,8 @@ namespace Fabpot\Amp\Sqlite\Internal;
 use Amp\DeferredFuture;
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
+use Amp\Sync\LocalMutex;
+use Amp\Sync\Lock;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteBlobStream;
 use Fabpot\Amp\Sqlite\SqliteResult;
@@ -33,6 +35,7 @@ final class Transaction implements SqliteTransaction
     private readonly DeferredFuture $onCommit;
     private readonly DeferredFuture $onRollback;
     private readonly DeferredFuture $onClose;
+    private readonly LocalMutex $stateMutex;
     private bool $active = true;
     private int $nextSavepointId = 1;
     private ?Transaction $activeNested = null;
@@ -47,6 +50,7 @@ final class Transaction implements SqliteTransaction
         $this->onCommit = new DeferredFuture();
         $this->onRollback = new DeferredFuture();
         $this->onClose = new DeferredFuture();
+        $this->stateMutex = new LocalMutex();
     }
 
     public function __destruct()
@@ -56,9 +60,13 @@ final class Transaction implements SqliteTransaction
 
     public function query(string $sql): SqliteResult
     {
-        $this->assertActive();
+        $lock = $this->acquireOperation();
 
-        return $this->connection->queryInTransaction($sql, $this);
+        try {
+            return $this->connection->queryInTransaction($sql, $this);
+        } finally {
+            $lock->release();
+        }
     }
 
     public function openBlob(
@@ -68,39 +76,59 @@ final class Transaction implements SqliteTransaction
         string $database = 'main',
         SqliteBlobMode $mode = SqliteBlobMode::ReadOnly,
     ): SqliteBlobStream {
-        $this->assertActive();
+        $lock = $this->acquireOperation();
 
-        return $this->connection->openBlobInTransaction($table, $column, $rowId, $database, $mode, $this);
+        try {
+            return $this->connection->openBlobInTransaction($table, $column, $rowId, $database, $mode, $this);
+        } finally {
+            $lock->release();
+        }
     }
 
     public function prepare(string $sql): SqliteStatement
     {
-        $this->assertActive();
+        $lock = $this->acquireOperation();
 
-        return $this->connection->prepareInTransaction($sql, $this);
+        try {
+            return $this->connection->prepareInTransaction($sql, $this);
+        } finally {
+            $lock->release();
+        }
     }
 
     public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult
     {
-        $this->assertActive();
+        $lock = $this->acquireOperation();
 
-        return $this->connection->executeInTransaction($sql, $params, $this);
+        try {
+            return $this->connection->executeInTransaction($sql, $params, $this);
+        } finally {
+            $lock->release();
+        }
     }
 
     public function beginTransaction(): SqliteTransaction
     {
-        $this->assertActive();
-        if ($this->activeNested !== null && $this->activeNested->isActive()) {
-            throw new SqliteTransactionError('The nested transaction is still active');
+        $lock = $this->stateMutex->acquire();
+
+        try {
+            if (!$this->isActive()) {
+                throw new SqliteTransactionError('The transaction has been committed or rolled back');
+            }
+            if ($this->activeNested !== null && $this->activeNested->isActive()) {
+                throw new SqliteTransactionError('The nested transaction is still active');
+            }
+
+            $savepoint = 'amp_sqlite_' . $this->nextSavepointId++;
+            $this->connection->executeControl("SAVEPOINT {$savepoint}");
+            $this->nestedBusy = new DeferredFuture();
+            $transaction = new self($this->connection, $this->mode, $this, $savepoint);
+            $this->activeNested = $transaction;
+
+            return $transaction;
+        } finally {
+            $lock->release();
         }
-
-        $savepoint = 'amp_sqlite_' . $this->nextSavepointId++;
-        $this->connection->executeControl("SAVEPOINT {$savepoint}");
-        $this->nestedBusy = new DeferredFuture();
-        $transaction = new self($this->connection, $this->mode, $this, $savepoint);
-        $this->activeNested = $transaction;
-
-        return $transaction;
     }
 
     public function getIsolation(): SqliteTransactionMode
@@ -120,41 +148,39 @@ final class Transaction implements SqliteTransaction
 
     public function commit(): void
     {
-        $this->assertNoActiveNestedTransaction();
-        $this->assertActive();
-        $this->connection->executeControl($this->savepoint === null ? 'COMMIT' : "RELEASE SAVEPOINT {$this->savepoint}");
-        $this->active = false;
-        $this->parent?->releaseNested($this);
-        if ($this->parent === null) {
-            $this->onCommit->complete();
-            $this->connection->releaseTransaction($this);
-        } else {
-            $onCommit = $this->onCommit;
-            $this->parent->onCommit(static fn () => $onCommit->isComplete() || $onCommit->complete());
-            $onRollback = $this->onRollback;
-            $this->parent->onRollback(static fn () => $onRollback->isComplete() || $onRollback->complete());
+        $lock = $this->stateMutex->acquire();
+
+        try {
+            $this->assertNoActiveNestedTransaction();
+            $this->assertActive();
+            $this->connection->executeControl($this->savepoint === null ? 'COMMIT' : "RELEASE SAVEPOINT {$this->savepoint}");
+            $this->active = false;
+            $this->parent?->releaseNested($this);
+            if ($this->parent === null) {
+                $this->onCommit->complete();
+                $this->connection->releaseTransaction($this);
+            } else {
+                $onCommit = $this->onCommit;
+                $this->parent->onCommit(static fn () => $onCommit->isComplete() || $onCommit->complete());
+                $onRollback = $this->onRollback;
+                $this->parent->onRollback(static fn () => $onRollback->isComplete() || $onRollback->complete());
+            }
+            $this->onClose->complete();
+        } finally {
+            $lock->release();
         }
-        $this->onClose->complete();
     }
 
     public function rollback(): void
     {
-        $this->assertNoActiveNestedTransaction();
-        $this->assertActive();
+        $lock = $this->stateMutex->acquire();
 
-        if ($this->savepoint === null) {
-            $this->connection->executeControl('ROLLBACK');
-        } else {
-            $this->connection->executeControl("ROLLBACK TO SAVEPOINT {$this->savepoint}");
-            $this->connection->executeControl("RELEASE SAVEPOINT {$this->savepoint}");
-        }
-
-        $this->active = false;
-        $this->parent?->releaseNested($this);
-        $this->onRollback->complete();
-        $this->onClose->complete();
-        if ($this->savepoint === null) {
-            $this->connection->releaseTransaction($this);
+        try {
+            $this->assertNoActiveNestedTransaction();
+            $this->assertActive();
+            $this->rollbackActive();
+        } finally {
+            $lock->release();
         }
     }
 
@@ -175,20 +201,26 @@ final class Transaction implements SqliteTransaction
 
     public function close(): void
     {
-        if (!$this->active) {
-            return;
+        $lock = $this->stateMutex->acquire();
+
+        try {
+            if (!$this->active) {
+                return;
+            }
+
+            if ($this->connection->isClosed()) {
+                $this->active = false;
+                $this->onRollback->complete();
+                $this->onClose->complete();
+
+                return;
+            }
+
+            $this->activeNested?->close();
+            $this->rollbackActive();
+        } finally {
+            $lock->release();
         }
-
-        if ($this->connection->isClosed()) {
-            $this->active = false;
-            $this->onRollback->complete();
-            $this->onClose->complete();
-
-            return;
-        }
-
-        $this->activeNested?->close();
-        $this->rollback();
     }
 
     public function isClosed(): bool
@@ -223,9 +255,36 @@ final class Transaction implements SqliteTransaction
         }
     }
 
-    public function awaitAvailable(): void
+    private function rollbackActive(): void
     {
-        $this->assertActive();
+        if ($this->savepoint === null) {
+            $this->connection->executeControl('ROLLBACK');
+        } else {
+            $this->connection->executeControl("ROLLBACK TO SAVEPOINT {$this->savepoint}");
+            $this->connection->executeControl("RELEASE SAVEPOINT {$this->savepoint}");
+        }
+
+        $this->active = false;
+        $this->parent?->releaseNested($this);
+        $this->onRollback->complete();
+        $this->onClose->complete();
+        if ($this->savepoint === null) {
+            $this->connection->releaseTransaction($this);
+        }
+    }
+
+    public function acquireOperation(): Lock
+    {
+        $lock = $this->stateMutex->acquire();
+
+        try {
+            $this->assertActive();
+
+            return $lock;
+        } catch (\Throwable $exception) {
+            $lock->release();
+            throw $exception;
+        }
     }
 
     private function assertActive(): void

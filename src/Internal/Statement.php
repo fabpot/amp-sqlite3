@@ -51,18 +51,23 @@ final class Statement implements SqliteStatement
             throw new \Error('The SQLite statement is closed');
         }
 
-        $this->transaction?->awaitAvailable();
-        $this->activeResult?->close();
-        $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $this->transaction);
-        $this->lastUsedAt = \time();
-        if (!$result->isClosed()) {
-            $this->activeResult = $result;
-            $result->onClose(function (): void {
-                $this->activeResult = null;
-            });
-        }
+        $transactionLock = $this->transaction?->acquireOperation();
 
-        return $result;
+        try {
+            $this->activeResult?->close();
+            $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $this->transaction);
+            $this->lastUsedAt = \time();
+            if (!$result->isClosed()) {
+                $this->activeResult = $result;
+                $result->onClose(function (): void {
+                    $this->activeResult = null;
+                });
+            }
+
+            return $result;
+        } finally {
+            $transactionLock?->release();
+        }
     }
 
     public function getQuery(): string

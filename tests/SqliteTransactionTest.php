@@ -118,6 +118,77 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame([['value' => 'after nested']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
+    public function testConcurrentNestedTransactionsCannotCorruptSavepoints(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $first = async(fn () => $transaction->beginTransaction());
+        $second = async(fn () => $transaction->beginTransaction());
+
+        $nested = $first->await();
+        try {
+            $second->await();
+            self::fail('Expected the concurrent nested transaction to be rejected');
+        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
+            self::assertSame('The nested transaction is still active', $error->getMessage());
+        }
+
+        $nested->rollback();
+        $transaction->rollback();
+    }
+
+    public function testConcurrentTransactionFinalizationIsSerialized(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $commit = async(fn () => $transaction->commit());
+        $rollback = async(fn () => $transaction->rollback());
+
+        $commit->await();
+        try {
+            $rollback->await();
+            self::fail('Expected the second finalization to be rejected');
+        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
+            self::assertSame('The transaction has been committed or rolled back', $error->getMessage());
+        }
+
+        self::assertFalse($transaction->isActive());
+    }
+
+    public function testCommitCannotRaceWithTransactionExecution(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $commit = async(fn () => $transaction->commit());
+        $execute = async(fn () => $transaction->execute('INSERT INTO entries VALUES (?)', ['too late']));
+
+        $commit->await();
+        try {
+            $execute->await();
+            self::fail('Expected execution after commit to be rejected');
+        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
+            self::assertSame('The transaction has been committed or rolled back', $error->getMessage());
+        }
+
+        self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testTransactionStatementCannotRaceWithCommit(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $statement = $transaction->prepare('INSERT INTO entries VALUES (?)');
+        $commit = async(fn () => $transaction->commit());
+        $execute = async(fn () => $statement->execute(['too late']));
+
+        $commit->await();
+        try {
+            $execute->await();
+            self::fail('Expected statement execution after commit to be rejected');
+        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
+            self::assertSame('The transaction has been committed or rolled back', $error->getMessage());
+        }
+
+        $statement->close();
+        self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
     public function testTransactionStatementWaitsForNestedTransaction(): void
     {
         $transaction = $this->connection->beginTransaction();
