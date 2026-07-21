@@ -204,11 +204,23 @@ final class SqliteQueryTest extends TestCase
             $this->connection->execute('SELECT :value AS value, :value AS again', [':value' => 'same'])->fetchRow(),
         );
         self::assertSame(
+            ['value' => 'second'],
+            $this->connection->execute('SELECT :value AS value', [':value' => 'first', 'value' => 'second'])->fetchRow(),
+        );
+        self::assertSame(
             ['numbered' => 'one', 'colon' => 'two', 'at' => 'three', 'dollar' => 'four'],
             $this->connection->execute(
                 'SELECT ?1 AS numbered, :colon AS colon, @at AS at, $dollar AS dollar',
                 [0 => 'one', ':colon' => 'two', '@at' => 'three', 3 => 'four'],
             )->fetchRow(),
+        );
+    }
+
+    public function testUnboundParametersEvaluateAsNull(): void
+    {
+        self::assertSame(
+            ['first' => null, 'second' => 'value'],
+            $this->connection->execute('SELECT ?1 AS first, ?2 AS second', [1 => 'value'])->fetchRow(),
         );
     }
 
@@ -222,10 +234,8 @@ final class SqliteQueryTest extends TestCase
 
     public static function provideInvalidParameters(): iterable
     {
-        yield 'missing positional' => ['SELECT ?', []];
         yield 'extra positional' => ['SELECT 1', [1]];
         yield 'invalid position' => ['SELECT ?', [1 => 'value']];
-        yield 'missing named' => ['SELECT :value', []];
         yield 'extra named' => ['SELECT :value', [':value' => 1, ':extra' => 2]];
         yield 'invalid named parameter' => ['SELECT :value', ['missing' => 1]];
     }
@@ -250,8 +260,8 @@ final class SqliteQueryTest extends TestCase
     public function testRedactsParameterValuesFromExceptionTraces(): void
     {
         try {
-            $this->connection->execute('SELECT ?, ?', ['s3cr3t-password']);
-            self::fail('Expected the parameter count mismatch to fail');
+            $this->connection->execute('SELECT 1', ['s3cr3t-password']);
+            self::fail('Expected the invalid parameter to fail');
         } catch (SqliteQueryError $error) {
             self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
         }
@@ -341,8 +351,8 @@ final class SqliteQueryTest extends TestCase
         }
 
         try {
-            $this->connection->execute('SELECT ?', []);
-            self::fail('Expected the parameter count mismatch to fail');
+            $this->connection->execute('SELECT :value', ['missing' => 1]);
+            self::fail('Expected the invalid parameter to fail');
         } catch (SqliteQueryError $error) {
             self::assertSame(0, $error->getResultCode());
             self::assertSame(0, $error->getExtendedResultCode());

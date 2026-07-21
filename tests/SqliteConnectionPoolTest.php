@@ -118,8 +118,8 @@ final class SqliteConnectionPoolTest extends TestCase
     public function testExecuteRedactsParameterValuesFromExceptionTraces(): void
     {
         try {
-            $this->pool->execute('SELECT ?, ?', ['s3cr3t-password']);
-            self::fail('Expected the parameter count mismatch to fail');
+            $this->pool->execute('SELECT 1', ['s3cr3t-password']);
+            self::fail('Expected the invalid parameter to fail');
         } catch (SqliteQueryError $error) {
             self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
         }
@@ -127,11 +127,11 @@ final class SqliteConnectionPoolTest extends TestCase
 
     public function testStatementRedactsParameterValuesFromExceptionTraces(): void
     {
-        $statement = $this->pool->prepare('SELECT ?, ?');
+        $statement = $this->pool->prepare('SELECT 1');
 
         try {
             $statement->execute(['s3cr3t-password']);
-            self::fail('Expected the parameter count mismatch to fail');
+            self::fail('Expected the invalid parameter to fail');
         } catch (SqliteQueryError $error) {
             self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
         }
@@ -142,8 +142,8 @@ final class SqliteConnectionPoolTest extends TestCase
         $transaction = $this->pool->beginTransaction();
 
         try {
-            $transaction->execute('SELECT ?, ?', ['s3cr3t-password']);
-            self::fail('Expected the parameter count mismatch to fail');
+            $transaction->execute('SELECT 1', ['s3cr3t-password']);
+            self::fail('Expected the invalid parameter to fail');
         } catch (SqliteQueryError $error) {
             self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
         } finally {
@@ -154,11 +154,11 @@ final class SqliteConnectionPoolTest extends TestCase
     public function testTransactionStatementRedactsParameterValuesFromExceptionTraces(): void
     {
         $transaction = $this->pool->beginTransaction();
-        $statement = $transaction->prepare('SELECT ?, ?');
+        $statement = $transaction->prepare('SELECT 1');
 
         try {
             $statement->execute(['s3cr3t-password']);
-            self::fail('Expected the parameter count mismatch to fail');
+            self::fail('Expected the invalid parameter to fail');
         } catch (SqliteQueryError $error) {
             self::assertStringNotContainsString('s3cr3t', \var_export($error->getTrace(), true));
         } finally {

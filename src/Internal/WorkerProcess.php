@@ -410,14 +410,6 @@ final class WorkerProcess
             throw new \RuntimeException('Parameters are not allowed in direct queries');
         }
 
-        if ($bindParameters && \count($request['params']) !== $statement->paramCount()) {
-            throw new \RuntimeException(\sprintf(
-                'Expected %d parameters, got %d',
-                $statement->paramCount(),
-                \count($request['params']),
-            ));
-        }
-
         foreach ($request['params'] as $key => $value) {
             $position = \is_int($key) ? $key + 1 : $key;
             $type = match (true) {
