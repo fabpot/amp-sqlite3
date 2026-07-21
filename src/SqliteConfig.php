@@ -35,7 +35,7 @@ final class SqliteConfig extends SqlConfig
     private SqliteTransactionMode $transactionMode = SqliteTransactionMode::Deferred;
     private bool $extendedResultCodes = true;
 
-    /** @var array<string, null|bool|int|float|string> */
+    /** @var array<string, bool|int|float|string> */
     private array $pragmas = [];
 
     /** @var array<string, array{callback: string, arg_count: int, deterministic: bool}> */
@@ -182,7 +182,7 @@ final class SqliteConfig extends SqlConfig
         return $config;
     }
 
-    public function withPragma(string $name, #[\SensitiveParameter] null|bool|int|float|string $value): self
+    public function withPragma(string $name, #[\SensitiveParameter] bool|int|float|string $value): self
     {
         if (!\preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name)) {
             throw new \InvalidArgumentException("Invalid pragma name '{$name}'");
@@ -199,7 +199,7 @@ final class SqliteConfig extends SqlConfig
         return $config;
     }
 
-    /** @return array<string, null|bool|int|float|string> */
+    /** @return array<string, bool|int|float|string> */
     public function getPragmas(): array
     {
         return $this->pragmas;

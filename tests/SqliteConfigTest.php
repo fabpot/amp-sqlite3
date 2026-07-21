@@ -98,11 +98,18 @@ final class SqliteConfigTest extends TestCase
         yield ['busy_timeout'];
     }
 
-    public function testRejectsUnsupportedPragmaValue(): void
+    #[DataProvider('provideUnsupportedPragmaValues')]
+    public function testRejectsUnsupportedPragmaValue(mixed $value): void
     {
         $this->expectException(\TypeError::class);
 
-        (new SqliteConfig(':memory:'))->withPragma('cache_size', []);
+        (new SqliteConfig(':memory:'))->withPragma('cache_size', $value);
+    }
+
+    public static function provideUnsupportedPragmaValues(): iterable
+    {
+        yield [null];
+        yield [[]];
     }
 
     public function testRejectsWalForReadOnlyConnections(): void

@@ -55,7 +55,7 @@ final class WorkerProcess
      *     batch_size: positive-int,
      *     trusted_schema: bool,
      *     extended_result_codes: bool,
-     *     pragmas: array<string, null|bool|int|float|string>,
+     *     pragmas: array<string, bool|int|float|string>,
      *     functions: array<string, array{callback: string, arg_count: int, deterministic: bool}>,
      *     aggregates: array<string, array{step: string, final: string, arg_count: int}>,
      *     collations: array<string, string>
@@ -506,10 +506,9 @@ final class WorkerProcess
         return $statement;
     }
 
-    private function applyPragma(string $name, null|bool|int|float|string $value): null|bool|int|float|string
+    private function applyPragma(string $name, bool|int|float|string $value): null|bool|int|float|string
     {
         $encoded = match (true) {
-            $value === null => 'NULL',
             \is_bool($value) => $value ? '1' : '0',
             \is_int($value), \is_float($value) => (string) $value,
             default => "'" . $this->database->escapeString($value) . "'",
