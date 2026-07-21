@@ -118,6 +118,27 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame([['value' => 'after nested']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
+    public function testParentFinalizationDoesNotDeadlockBehindOperationWaitingForNestedTransaction(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $nested = $transaction->beginTransaction();
+        $query = async(fn () => $transaction->query('SELECT 1'));
+        delay(0);
+        $close = async(fn () => $transaction->close());
+        $close->await();
+
+        self::assertTrue($close->isComplete());
+        self::assertFalse($transaction->isActive());
+
+        try {
+            $query->await();
+            self::fail('Expected the waiting query to be rejected');
+        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
+            self::assertSame('The transaction has been committed or rolled back', $error->getMessage());
+        }
+        self::assertFalse($nested->isActive());
+    }
+
     public function testConcurrentNestedTransactionsCannotCorruptSavepoints(): void
     {
         $transaction = $this->connection->beginTransaction();

@@ -275,24 +275,34 @@ final class Transaction implements SqliteTransaction
 
     public function acquireOperation(): Lock
     {
-        $lock = $this->stateMutex->acquire();
+        while (true) {
+            $nestedBusy = $this->nestedBusy;
+            if ($nestedBusy !== null) {
+                $nestedBusy->getFuture()->await();
 
-        try {
-            $this->assertActive();
+                continue;
+            }
+
+            $lock = $this->stateMutex->acquire();
+            $nestedBusy = $this->nestedBusy;
+            if ($nestedBusy !== null) {
+                $lock->release();
+
+                continue;
+            }
+
+            if (!$this->isActive()) {
+                $lock->release();
+
+                throw new SqliteTransactionError('The transaction has been committed or rolled back');
+            }
 
             return $lock;
-        } catch (\Throwable $exception) {
-            $lock->release();
-            throw $exception;
         }
     }
 
     private function assertActive(): void
     {
-        while ($this->nestedBusy !== null) {
-            $this->nestedBusy->getFuture()->await();
-        }
-
         if (!$this->isActive()) {
             throw new SqliteTransactionError('The transaction has been committed or rolled back');
         }
