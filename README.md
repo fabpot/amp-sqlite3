@@ -57,11 +57,10 @@ $config = (new SqliteConfig(__DIR__ . '/database.sqlite'))
     ->withTrustedSchema(false)
     ->withBatchSize(100)                                    // rows fetched per IPC round trip
     ->withTransactionMode(SqliteTransactionMode::Deferred)
-    ->withExtendedResultCodes(true)
-    ->withPragma('cache_size', -8_000);
+    ->withExtendedResultCodes(true);
 ```
 
-`SqliteConfig` is immutable; every `with*()` method returns a new instance. Invalid combinations (e.g. an explicit journal mode on a read-only database) are rejected. Pragmas with a dedicated option (`journal_mode`, `synchronous`, `foreign_keys`, `busy_timeout`, `trusted_schema`) cannot be set through `withPragma()`.
+Additional pragmas default to none and can be configured as needed, for example with `->withPragma('cache_size', -8_000)`. `SqliteConfig` is immutable; every `with*()` method returns a new instance. Invalid combinations (e.g. an explicit journal mode on a read-only database) are rejected. Pragmas with a dedicated option (`journal_mode`, `synchronous`, `foreign_keys`, `busy_timeout`, `trusted_schema`) cannot be set through `withPragma()`.
 
 Connection pools use the configured transaction mode by default. Pass `transactionIsolation` to the pool constructor or call `setTransactionIsolation()` to override it.
 
