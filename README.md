@@ -1,4 +1,4 @@
-# AMPHP SQLite
+# AMPHP SQLite3
 
 An asynchronous SQLite driver for AMPHP. Every logical connection owns a dedicated child process and a persistent native `SQLite3` connection, so blocking SQLite operations do not block the event loop and connection-local state is preserved.
 
@@ -155,7 +155,7 @@ Row values keep their SQLite types: `null`, `int`, `float`, `string`, or `Sqlite
 ```php
 $insert = $connection->execute('INSERT INTO users (name) VALUES (?)', ['Alice']);
 
-$insert->getRowCount();     // changed rows, including trigger changes; 0 for DDL
+$insert->getRowCount();     // changed rows, including trigger changes; 0 for DDL; null for row-producing SQL
 $insert->getLastInsertId(); // last inserted row ID
 $insert->getColumnCount();  // null for commands, column count for row-producing SQL
 $insert->getColumnNames();  // null for commands, list of column names for row-producing SQL
@@ -303,6 +303,8 @@ try {
 ```
 
 A transaction owns its connection until committed or rolled back. An abandoned transaction is rolled back automatically. Configure the top-level mode with `SqliteTransactionMode::Deferred`, `Immediate`, or `Exclusive`.
+
+Close any unread results and open BLOB streams before committing or rolling back: these own the transaction's connection while active, so `commit()` and `rollback()` wait for them.
 
 Nested transactions use SQLite savepoints:
 
