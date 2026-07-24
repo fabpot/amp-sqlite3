@@ -125,7 +125,18 @@ The driver accepts SQLite's native anonymous (`?`), numbered (`?NNN`), and named
 
 Parameter values must be `null`, `bool`, `int`, `float`, `string`, or `SqliteBlob`; anything else throws a `TypeError`. Booleans are bound as integers.
 
-The driver accepts one SQL statement per operation. Empty SQL and multiple statements are rejected.
+The driver accepts one SQL statement per `query()` or `execute()` operation. Empty SQL and multiple statements are rejected.
+
+Use `executeScript()` for parameterless schema or migration scripts containing multiple statements:
+
+```php
+$connection->executeScript(<<<'SQL'
+    CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+    CREATE INDEX users_name ON users (name);
+    SQL);
+```
+
+Statements execute in order and stop at the first error. Scripts are not wrapped in an implicit transaction; add explicit `BEGIN` and `COMMIT` statements when atomic execution is required.
 
 ## Results
 

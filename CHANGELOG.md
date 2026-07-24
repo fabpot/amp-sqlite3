@@ -2,6 +2,7 @@
 
 ## 1.0
 
+- Add explicit execution for multi-statement SQL scripts.
 - Add a stable asynchronous SQLite driver with pooling, transactions, incremental BLOB I/O, backups, and custom SQL callables.
 
 ## 0.2

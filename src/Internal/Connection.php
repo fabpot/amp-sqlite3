@@ -118,6 +118,18 @@ final class Connection implements SqliteConnection
         return $this->config;
     }
 
+    public function executeScript(string $sql): void
+    {
+        $this->assertOpen();
+        $lock = $this->mutex->acquire();
+
+        try {
+            $this->request('executeScript', $sql, ['sql' => $sql]);
+        } finally {
+            $lock->release();
+        }
+    }
+
     public function getTransactionIsolation(): SqlTransactionIsolation
     {
         return $this->transactionMode;

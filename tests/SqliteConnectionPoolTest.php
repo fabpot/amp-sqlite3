@@ -98,6 +98,19 @@ final class SqliteConnectionPoolTest extends TestCase
         self::assertGreaterThan(0, $this->pool->getConnectionCount());
     }
 
+    public function testScriptsRunOnPooledConnections(): void
+    {
+        $this->pool->executeScript(<<<'SQL'
+            INSERT INTO entries VALUES ('first');
+            INSERT INTO entries VALUES ('second');
+            SQL);
+
+        self::assertSame(
+            [['value' => 'first'], ['value' => 'second']],
+            \iterator_to_array($this->pool->query('SELECT value FROM entries ORDER BY rowid')),
+        );
+    }
+
     public function testCommandResultImmediatelyReleasesItsConnection(): void
     {
         $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 1);

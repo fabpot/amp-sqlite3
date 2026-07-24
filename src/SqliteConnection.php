@@ -23,6 +23,13 @@ interface SqliteConnection extends SqliteLink, SqlConnection
     public function getConfig(): SqliteConfig;
 
     /**
+     * Executes one or more SQL statements without parameters.
+     *
+     * Statements execute in order, stop at the first error, and are not wrapped in an implicit transaction.
+     */
+    public function executeScript(string $sql): void;
+
+    /**
      * Copies the entire database to the given file using SQLite's online backup API,
      * replacing any existing contents. The destination must not be an open database.
      */

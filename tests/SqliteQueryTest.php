@@ -74,6 +74,39 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(['name' => 'CREATED'], $this->connection->query('SELECT name FROM events')->fetchRow());
     }
 
+    public function testExecutesMultipleStatementsAsScript(): void
+    {
+        $this->connection->executeScript(<<<'SQL'
+            CREATE TABLE events (name TEXT NOT NULL);
+            INSERT INTO events VALUES ('created');
+            INSERT INTO events VALUES ('updated');
+            SQL);
+
+        self::assertSame(
+            [['name' => 'created'], ['name' => 'updated']],
+            \iterator_to_array($this->connection->query('SELECT name FROM events ORDER BY rowid')),
+        );
+    }
+
+    public function testScriptStopsAtFirstErrorWithoutImplicitTransaction(): void
+    {
+        try {
+            $this->connection->executeScript(<<<'SQL'
+                CREATE TABLE events (name TEXT NOT NULL);
+                INSERT INTO events VALUES ('created');
+                INSERT INTO missing_table VALUES ('failed');
+                INSERT INTO events VALUES ('skipped');
+                SQL);
+            self::fail('Expected the invalid statement to fail');
+        } catch (SqliteQueryError) {
+        }
+
+        self::assertSame(
+            [['name' => 'created']],
+            \iterator_to_array($this->connection->query('SELECT name FROM events')),
+        );
+    }
+
     public function testAllowsUnterminatedTrailingBlockComment(): void
     {
         self::assertSame([1 => 1], $this->connection->query('SELECT 1; /* trailing')->fetchRow());

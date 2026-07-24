@@ -77,6 +77,17 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
         return parent::getConfig();
     }
 
+    public function executeScript(string $sql): void
+    {
+        $connection = $this->pop();
+
+        try {
+            $connection->executeScript($sql);
+        } finally {
+            $this->push($connection);
+        }
+    }
+
     public function query(string $sql): SqliteResult
     {
         $result = parent::query($sql);
