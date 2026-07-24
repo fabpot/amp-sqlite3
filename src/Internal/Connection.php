@@ -93,13 +93,12 @@ final class Connection implements SqliteConnection
 
         $lock = $this->mutex->acquire();
 
-        if ($this->activeTransaction?->get() !== null) {
-            $lock->release();
-
-            throw new SqliteTransactionError('A transaction is already active');
-        }
-
         try {
+            $this->assertOpen();
+            if ($this->activeTransaction?->get() !== null) {
+                throw new SqliteTransactionError('A transaction is already active');
+            }
+
             $this->executeControl('BEGIN ' . $this->transactionMode->toSql());
         } catch (\Throwable $exception) {
             $lock->release();
@@ -575,10 +574,12 @@ final class Connection implements SqliteConnection
         $this->activeTransaction = null;
         $transaction?->releaseOnConnectionClose();
 
-        $this->context->close();
-        try {
-            $this->context->join();
-        } catch (\Throwable) {
+        if (!$this->context->isClosed()) {
+            $this->context->close();
+            try {
+                $this->context->join();
+            } catch (\Throwable) {
+            }
         }
 
         if (!$this->onClose->isComplete()) {

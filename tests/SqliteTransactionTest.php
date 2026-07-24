@@ -410,6 +410,16 @@ final class SqliteTransactionTest extends TestCase
         }
     }
 
+    public function testBeginTransactionFailsOnClosedConnection(): void
+    {
+        $this->connection->close();
+
+        $this->expectException(\Fabpot\Amp\Sqlite\SqliteConnectionException::class);
+        $this->expectExceptionMessage('The SQLite connection is closed');
+
+        $this->connection->beginTransaction();
+    }
+
     public function testAbandonedTransactionRollsBackAndReleasesConnection(): void
     {
         (function (): void {
