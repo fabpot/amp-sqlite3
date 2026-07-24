@@ -14,11 +14,15 @@ declare(strict_types=1);
 namespace Fabpot\Amp\Sqlite;
 
 use Amp\Cancellation;
+use Amp\CancelledException;
+use Amp\Parallel\Context\ContextException;
 use Amp\Parallel\Context\ContextFactory;
+use Amp\Parallel\Context\ContextPanicError;
 use Amp\Parallel\Context\ProcessContext;
 use Amp\Parallel\Context\ProcessContextFactory;
 use Amp\Sql\SqlConfig;
 use Amp\Sql\SqlConnector;
+use Amp\TimeoutCancellation;
 use Fabpot\Amp\Sqlite\Internal\Connection;
 use Fabpot\Amp\Sqlite\Internal\Path;
 
@@ -43,9 +47,6 @@ final class SqliteConnector implements SqlConnector
         SqliteConfig::validatePath($config->getDatabase());
         if ($config->getHost() !== '' || $config->getPort() !== 0 || $config->getUser() !== null || $config->getPassword() !== null) {
             throw new \RuntimeException('SQLite configurations cannot contain server connection settings');
-        }
-        if ($config->getOpenMode() === SqliteOpenMode::ReadOnly && $config->getSynchronousMode() !== SqliteSynchronousMode::Automatic) {
-            throw new \RuntimeException('An explicit synchronous mode cannot be used with a read-only database');
         }
         $path = Path::resolve($config->getDatabase());
         $context = null;
@@ -79,15 +80,43 @@ final class SqliteConnector implements SqlConnector
                 throw new SqliteConnectionException('The SQLite child process sent an invalid startup response');
             }
         } catch (\RuntimeException $exception) {
+            $context?->close();
+
             throw $exception;
         } catch (\Throwable $exception) {
+            if ($context !== null && $exception instanceof ContextException) {
+                $exception = self::findChildFailure($context, $exception);
+            }
             $context?->close();
             $cancellation?->throwIfRequested();
 
-            throw new SqliteConnectionException('Could not start the SQLite child process: ' . $exception->getMessage(), previous: $exception);
+            throw new SqliteConnectionException('Could not start the SQLite child process: ' . self::describeStartupFailure($exception), previous: $exception);
         }
 
         return new Connection($config, $context);
     }
 
+    private static function findChildFailure(ProcessContext $context, ContextException $exception): \Throwable
+    {
+        try {
+            $context->join(new TimeoutCancellation(1));
+        } catch (CancelledException) {
+            // The child process is still running; keep the original failure.
+        } catch (\Throwable $failure) {
+            return $failure;
+        }
+
+        return $exception;
+    }
+
+    private static function describeStartupFailure(\Throwable $exception): string
+    {
+        for ($failure = $exception; $failure !== null; $failure = $failure->getPrevious()) {
+            if ($failure instanceof ContextPanicError) {
+                return $failure->getOriginalMessage();
+            }
+        }
+
+        return $exception->getMessage();
+    }
 }

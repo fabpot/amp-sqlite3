@@ -116,6 +116,7 @@ final class SqliteConnectionTest extends TestCase
         $config = (new SqliteConfig($path))->withOpenMode(SqliteOpenMode::ReadWrite);
 
         $this->expectException(SqliteConnectionException::class);
+        $this->expectExceptionMessage('unable to open database file');
 
         (new SqliteConnector())->connect($config);
     }
