@@ -77,6 +77,17 @@ final class SqliteConnectionTest extends TestCase
         self::assertSame('z:/database.sqlite', \Fabpot\Amp\Sqlite\Internal\Path::resolve('z:/database.sqlite'));
     }
 
+    public function testResolvesWindowsDriveRelativePathAgainstWorkingDirectory(): void
+    {
+        $workingDirectory = \getcwd();
+        self::assertIsString($workingDirectory);
+
+        self::assertSame(
+            $workingDirectory . \DIRECTORY_SEPARATOR . 'C:database.sqlite',
+            \Fabpot\Amp\Sqlite\Internal\Path::resolve('C:database.sqlite'),
+        );
+    }
+
     public function testResolvesEmptyAndNullPaths(): void
     {
         $workingDirectory = \getcwd();

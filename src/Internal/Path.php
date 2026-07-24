@@ -36,6 +36,17 @@ final class Path
 
     private static function isAbsolute(string $path): bool
     {
-        return isset($path[0]) && ($path[0] === '/' || $path[0] === '\\' || (isset($path[2]) && (('A' <= $path[0] && $path[0] <= 'Z') || ('a' <= $path[0] && $path[0] <= 'z')) && $path[1] === ':'));
+        if (!isset($path[0])) {
+            return false;
+        }
+
+        if ($path[0] === '/' || $path[0] === '\\') {
+            return true;
+        }
+
+        return isset($path[2])
+            && (('A' <= $path[0] && $path[0] <= 'Z') || ('a' <= $path[0] && $path[0] <= 'z'))
+            && $path[1] === ':'
+            && ($path[2] === '/' || $path[2] === '\\');
     }
 }
