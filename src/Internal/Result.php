@@ -101,6 +101,8 @@ final class Result implements SqliteResult, \IteratorAggregate
 
     public function getIterator(): \Traversable
     {
+        // Iteration must end silently on a closed result: SqlPooledResult drains the
+        // inner iterator after an explicit close() to release the pooled connection.
         while (!$this->closed && ($row = $this->fetchRow()) !== null) {
             yield $row;
         }

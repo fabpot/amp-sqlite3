@@ -32,6 +32,9 @@ final class PooledTransaction implements SqliteTransaction
     /** @var object{count: int} */
     private readonly object $references;
 
+    /** @var \Closure():void */
+    private readonly \Closure $release;
+
     /**
      * @param \Closure():void $release
      */
@@ -53,9 +56,6 @@ final class PooledTransaction implements SqliteTransaction
             $this->close();
         }
     }
-
-    /** @var \Closure():void */
-    private readonly \Closure $release;
 
     public function query(string $sql): SqliteResult
     {

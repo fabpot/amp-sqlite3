@@ -86,7 +86,7 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
 
     public function write(string $bytes): void
     {
-        if (!$this->isWritable()) {
+        if ($this->closed || $this->mode !== SqliteBlobMode::ReadWrite) {
             throw new ClosedException('The SQLite BLOB stream is not writable');
         }
 
