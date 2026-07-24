@@ -135,7 +135,7 @@ Rows are fetched from the child process in configured batches:
 $result = $connection->query('SELECT id, name FROM users ORDER BY id');
 
 foreach ($result as $row) {
-    echo $row['name'], "\n";
+    echo $row['name'] . "\n";
 }
 ```
 
