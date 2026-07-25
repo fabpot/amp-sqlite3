@@ -328,7 +328,28 @@ final class WorkerProcess
         $this->database->exec('BEGIN ' . $transactionMode);
 
         try {
-            $this->database->exec($sql);
+            if (!SqlStatementBoundary::hasSecondStatement($sql)) {
+                throw new \RuntimeException('SQL script must contain an executable statement');
+            }
+
+            do {
+                $statement = $this->database->prepare($sql);
+                if (!$statement) {
+                    throw new \RuntimeException('SQL script must contain an executable statement');
+                }
+                try {
+                    $statementSql = $statement->getSQL();
+                    if (\preg_match('/\A(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/is', $statementSql)) {
+                        throw new \RuntimeException('SQL scripts cannot contain transaction-control statements');
+                    }
+                    $result = $statement->execute();
+                    $result->finalize();
+                } finally {
+                    $statement->close();
+                }
+                $sql = \substr($sql, \strlen($statementSql));
+            } while (SqlStatementBoundary::hasSecondStatement($sql));
+
             $this->database->exec('COMMIT');
         } catch (\Throwable $exception) {
             try {

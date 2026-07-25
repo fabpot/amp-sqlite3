@@ -121,7 +121,7 @@ final class SqliteQueryTest extends TestCase
     public function testScriptCannotControlItsTransaction(): void
     {
         $this->expectException(SqliteQueryError::class);
-        $this->expectExceptionMessage('cannot start a transaction within a transaction');
+        $this->expectExceptionMessage('SQL scripts cannot contain transaction-control statements');
 
         $this->connection->executeScript('BEGIN; SELECT 1; COMMIT;');
     }
