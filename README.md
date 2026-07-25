@@ -136,7 +136,7 @@ $connection->executeScript(<<<'SQL'
     SQL);
 ```
 
-Statements execute in order and stop at the first error. Scripts are not wrapped in an implicit transaction; add explicit `BEGIN` and `COMMIT` statements when atomic execution is required.
+Statements execute in order and stop at the first error. Scripts are not wrapped in an implicit transaction; add explicit `BEGIN` and `COMMIT` statements when atomic execution is required. A failed script rolls back any explicit transaction it leaves open.
 
 ## Results
 

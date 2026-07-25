@@ -325,7 +325,16 @@ final class WorkerProcess
 
     private function executeScript(string $sql): null
     {
-        $this->database->exec($sql);
+        try {
+            $this->database->exec($sql);
+        } catch (\Throwable $exception) {
+            try {
+                $this->database->exec('ROLLBACK');
+            } catch (\Throwable) {
+            }
+
+            throw $exception;
+        }
 
         return null;
     }

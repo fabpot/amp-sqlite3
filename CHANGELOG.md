@@ -5,6 +5,7 @@
 - Fix a hang when beginning a transaction on a closed connection.
 - Surface the child-process error when a connection fails to start.
 - Resolve Windows drive-relative paths against the working directory.
+- Roll back explicit transactions left open by failed SQL scripts.
 - Add explicit execution for multi-statement SQL scripts.
 - Add a stable asynchronous SQLite driver with pooling, transactions, incremental BLOB I/O, backups, and custom SQL callables.
 

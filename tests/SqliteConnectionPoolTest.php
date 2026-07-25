@@ -111,6 +111,23 @@ final class SqliteConnectionPoolTest extends TestCase
         );
     }
 
+    public function testFailedScriptDoesNotReturnATaintedConnectionToThePool(): void
+    {
+        try {
+            $this->pool->executeScript(<<<'SQL'
+                BEGIN;
+                INSERT INTO entries VALUES ('rolled back');
+                INSERT INTO missing_table VALUES ('failed');
+                COMMIT;
+                SQL);
+            self::fail('Expected the invalid statement to fail');
+        } catch (SqliteQueryError) {
+        }
+
+        $this->pool->execute('INSERT INTO entries VALUES (?)', ['committed']);
+        self::assertSame([['value' => 'committed']], \iterator_to_array($this->pool->query('SELECT value FROM entries')));
+    }
+
     public function testCommandResultImmediatelyReleasesItsConnection(): void
     {
         $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 1);

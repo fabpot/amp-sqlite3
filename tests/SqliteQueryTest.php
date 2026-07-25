@@ -107,6 +107,25 @@ final class SqliteQueryTest extends TestCase
         );
     }
 
+    public function testFailedScriptRollsBackAnExplicitTransaction(): void
+    {
+        try {
+            $this->connection->executeScript(<<<'SQL'
+                BEGIN;
+                CREATE TABLE events (name TEXT NOT NULL);
+                INSERT INTO events VALUES ('created');
+                INSERT INTO missing_table VALUES ('failed');
+                COMMIT;
+                SQL);
+            self::fail('Expected the invalid statement to fail');
+        } catch (SqliteQueryError) {
+        }
+
+        self::assertNull($this->connection->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'")->fetchRow());
+        $transaction = $this->connection->beginTransaction();
+        $transaction->rollback();
+    }
+
     public function testAllowsUnterminatedTrailingBlockComment(): void
     {
         self::assertSame([1 => 1], $this->connection->query('SELECT 1; /* trailing')->fetchRow());
