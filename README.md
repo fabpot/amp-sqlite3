@@ -136,7 +136,7 @@ $connection->executeScript(<<<'SQL'
     SQL);
 ```
 
-Statements execute in order and stop at the first error. Scripts are not wrapped in an implicit transaction; add explicit `BEGIN` and `COMMIT` statements when atomic execution is required. A failed script rolls back any explicit transaction it leaves open.
+The complete script executes atomically using the connection's configured transaction mode. A failed statement rolls back the entire script. Transaction-control statements such as `BEGIN`, `COMMIT`, and `ROLLBACK` are not supported inside scripts, nor are statements such as `VACUUM` that SQLite cannot execute in a transaction.
 
 ## Results
 

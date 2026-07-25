@@ -25,7 +25,7 @@ interface SqliteConnection extends SqliteLink, SqlConnection
     /**
      * Executes one or more SQL statements without parameters.
      *
-     * Statements execute in order, stop at the first error, and are not wrapped in an implicit transaction.
+     * Statements execute atomically using the connection's configured transaction mode.
      */
     public function executeScript(string $sql): void;
 

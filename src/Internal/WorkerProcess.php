@@ -116,7 +116,7 @@ final class WorkerProcess
             'fetch' => $this->fetch($request['result_id']),
             'closeResult' => $this->closeResult($request['result_id']),
             'execute', 'executeStatement' => $this->execute($request),
-            'executeScript' => $this->executeScript($request['sql']),
+            'executeScript' => $this->executeScript($request['sql'], $request['transaction_mode']),
             default => throw new ProtocolError("Unknown operation '{$request['operation']}'"),
         };
     }
@@ -323,10 +323,13 @@ final class WorkerProcess
         return null;
     }
 
-    private function executeScript(string $sql): null
+    private function executeScript(string $sql, string $transactionMode): null
     {
+        $this->database->exec('BEGIN ' . $transactionMode);
+
         try {
             $this->database->exec($sql);
+            $this->database->exec('COMMIT');
         } catch (\Throwable $exception) {
             try {
                 $this->database->exec('ROLLBACK');

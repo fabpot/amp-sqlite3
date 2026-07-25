@@ -123,7 +123,7 @@ final class Connection implements SqliteConnection
         $lock = $this->mutex->acquire();
 
         try {
-            $this->request('executeScript', $sql, ['sql' => $sql]);
+            $this->request('executeScript', $sql, ['sql' => $sql, 'transaction_mode' => $this->transactionMode->toSql()]);
         } finally {
             $lock->release();
         }

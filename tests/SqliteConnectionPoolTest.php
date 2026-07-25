@@ -115,10 +115,8 @@ final class SqliteConnectionPoolTest extends TestCase
     {
         try {
             $this->pool->executeScript(<<<'SQL'
-                BEGIN;
                 INSERT INTO entries VALUES ('rolled back');
                 INSERT INTO missing_table VALUES ('failed');
-                COMMIT;
                 SQL);
             self::fail('Expected the invalid statement to fail');
         } catch (SqliteQueryError) {

@@ -23,6 +23,7 @@ use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
 use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
+use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
@@ -89,7 +90,7 @@ final class SqliteQueryTest extends TestCase
         );
     }
 
-    public function testScriptStopsAtFirstErrorWithoutImplicitTransaction(): void
+    public function testFailedScriptRollsBackEveryStatement(): void
     {
         try {
             $this->connection->executeScript(<<<'SQL'
@@ -102,29 +103,27 @@ final class SqliteQueryTest extends TestCase
         } catch (SqliteQueryError) {
         }
 
-        self::assertSame(
-            [['name' => 'created']],
-            \iterator_to_array($this->connection->query('SELECT name FROM events')),
-        );
+        self::assertNull($this->connection->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'")->fetchRow());
     }
 
-    public function testFailedScriptRollsBackAnExplicitTransaction(): void
+    public function testScriptUsesConfiguredTransactionMode(): void
     {
-        try {
-            $this->connection->executeScript(<<<'SQL'
-                BEGIN;
-                CREATE TABLE events (name TEXT NOT NULL);
-                INSERT INTO events VALUES ('created');
-                INSERT INTO missing_table VALUES ('failed');
-                COMMIT;
-                SQL);
-            self::fail('Expected the invalid statement to fail');
-        } catch (SqliteQueryError) {
-        }
+        $connection = (new SqliteConnector())->connect((new SqliteConfig(':memory:'))->withTransactionMode(SqliteTransactionMode::Immediate));
 
-        self::assertNull($this->connection->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'")->fetchRow());
-        $transaction = $this->connection->beginTransaction();
-        $transaction->rollback();
+        try {
+            $connection->executeScript('CREATE TABLE events (name TEXT NOT NULL); INSERT INTO events VALUES (\'created\');');
+            self::assertSame(['name' => 'created'], $connection->query('SELECT name FROM events')->fetchRow());
+        } finally {
+            $connection->close();
+        }
+    }
+
+    public function testScriptCannotControlItsTransaction(): void
+    {
+        $this->expectException(SqliteQueryError::class);
+        $this->expectExceptionMessage('cannot start a transaction within a transaction');
+
+        $this->connection->executeScript('BEGIN; SELECT 1; COMMIT;');
     }
 
     public function testAllowsUnterminatedTrailingBlockComment(): void
