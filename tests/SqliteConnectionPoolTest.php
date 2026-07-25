@@ -111,6 +111,19 @@ final class SqliteConnectionPoolTest extends TestCase
         );
     }
 
+    public function testScriptUsesThePoolTransactionMode(): void
+    {
+        $this->pool->setTransactionIsolation(SqliteTransactionMode::Immediate);
+        $this->pool->executeScript("INSERT INTO entries VALUES ('created');");
+
+        $connection = $this->pool->extractConnection();
+        try {
+            self::assertSame(SqliteTransactionMode::Immediate, $connection->getTransactionIsolation());
+        } finally {
+            $connection->close();
+        }
+    }
+
     public function testFailedScriptDoesNotReturnATaintedConnectionToThePool(): void
     {
         try {

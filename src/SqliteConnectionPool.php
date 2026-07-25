@@ -82,6 +82,7 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
         $connection = $this->pop();
 
         try {
+            $connection->setTransactionIsolation($this->getTransactionIsolation());
             $connection->executeScript($sql);
         } finally {
             $this->push($connection);
