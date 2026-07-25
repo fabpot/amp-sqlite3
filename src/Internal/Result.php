@@ -18,6 +18,7 @@ use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
 use Amp\Sync\Lock;
 use Fabpot\Amp\Sqlite\SqliteBlob;
+use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 
 /**
@@ -78,7 +79,7 @@ final class Result implements SqliteResult, \IteratorAggregate
                 return null;
             }
 
-            throw new \Error('The SQLite result is closed');
+            throw new SqliteException('The SQLite result is closed');
         }
 
         if ($this->rows === []) {

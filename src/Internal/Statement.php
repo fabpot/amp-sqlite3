@@ -16,6 +16,7 @@ namespace Fabpot\Amp\Sqlite\Internal;
 use Amp\DeferredFuture;
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
+use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 
@@ -48,7 +49,7 @@ final class Statement implements SqliteStatement
     public function execute(#[\SensitiveParameter] array $params = []): SqliteResult
     {
         if ($this->closed) {
-            throw new \Error('The SQLite statement is closed');
+            throw new SqliteException('The SQLite statement is closed');
         }
 
         $transactionLock = $this->transaction?->acquireOperation();

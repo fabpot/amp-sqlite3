@@ -16,6 +16,7 @@ namespace Fabpot\Amp\Sqlite\Test;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
 use PHPUnit\Framework\TestCase;
 use function Amp\delay;
@@ -94,7 +95,7 @@ final class SqliteStatementTest extends TestCase
         self::assertSame(1, $closed);
         self::assertTrue($statement->isClosed());
 
-        $this->expectException(\Error::class);
+        $this->expectException(SqliteException::class);
         $statement->execute();
     }
 

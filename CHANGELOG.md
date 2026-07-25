@@ -2,6 +2,7 @@
 
 ## 1.0
 
+- Throw SqliteException instead of plain Error for closed statements and results.
 - Fix a hang when beginning a transaction on a closed connection.
 - Surface the child-process error when a connection fails to start.
 - Resolve Windows drive-relative paths against the working directory.

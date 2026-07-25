@@ -338,6 +338,7 @@ try {
 - `SqliteQueryError`: SQL preparation and execution failures, with SQLite result codes.
 - `SqliteConnectionException`: startup, IPC, and unexpected child-process failures.
 - `SqliteTransactionError`: operations on finished transactions.
+- `SqliteException`: operations on closed statements or results.
 - All implement `SqliteExceptionInterface` and extend the corresponding `Amp\Sql` errors or exceptions.
 
 Exception messages and traces never contain bound parameter values.

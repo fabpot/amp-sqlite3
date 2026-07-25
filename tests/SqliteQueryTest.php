@@ -18,6 +18,7 @@ use Fabpot\Amp\Sqlite\Internal\WorkerProcess;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
@@ -240,7 +241,7 @@ final class SqliteQueryTest extends TestCase
         $result = $this->connection->query('SELECT 1');
         $result->close();
 
-        $this->expectException(\Error::class);
+        $this->expectException(SqliteException::class);
 
         $result->fetchRow();
     }

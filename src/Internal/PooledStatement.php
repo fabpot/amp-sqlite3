@@ -15,7 +15,7 @@ namespace Fabpot\Amp\Sqlite\Internal;
 
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
-use Amp\Sql\SqlException;
+use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 use Revolt\EventLoop;
@@ -59,7 +59,7 @@ final class PooledStatement implements SqliteStatement
     public function execute(#[\SensitiveParameter] array $params = []): SqliteResult
     {
         if ($this->release === null) {
-            throw new SqlException('The statement has been closed');
+            throw new SqliteException('The statement has been closed');
         }
 
         if ($this->awaitBusyResource !== null) {
