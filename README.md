@@ -25,7 +25,7 @@ $config = (new SqliteConfig(__DIR__ . '/database.sqlite'))
 $connection = (new SqliteConnector())->connect($config);
 ```
 
-Writable file databases use WAL and `NORMAL` synchronous mode by default. Foreign keys are enabled and trusted schema is disabled. `:memory:` databases retain SQLite's memory journal behavior.
+Writable file databases use WAL and `NORMAL` synchronous mode by default. When an explicit rollback journal mode is selected, automatic synchronous mode preserves SQLite's default. Foreign keys are enabled and trusted schema is disabled. `:memory:` databases retain SQLite's memory journal behavior.
 
 Always close connections when they are no longer needed:
 

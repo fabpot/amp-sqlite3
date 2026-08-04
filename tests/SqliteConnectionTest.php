@@ -244,14 +244,18 @@ final class SqliteConnectionTest extends TestCase
         self::assertSame(1, $closed);
     }
 
-    public function testUsesExplicitJournalMode(): void
+    public function testExplicitRollbackJournalPreservesSynchronousDefault(): void
     {
         $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $database = new \SQLite3($path);
+        $synchronous = $database->querySingle('PRAGMA synchronous');
+        $database->close();
         $config = (new SqliteConfig($path))->withJournalMode(SqliteJournalMode::Delete);
         $connection = (new SqliteConnector())->connect($config);
 
         try {
             self::assertSame(['journal_mode' => 'delete'], $connection->query('PRAGMA journal_mode')->fetchRow());
+            self::assertSame(['synchronous' => $synchronous], $connection->query('PRAGMA synchronous')->fetchRow());
         } finally {
             $connection->close();
             @\unlink($path);

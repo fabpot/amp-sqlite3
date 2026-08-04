@@ -603,7 +603,10 @@ final class WorkerProcess
     {
         if ($open['synchronous_mode'] !== SqliteSynchronousMode::Automatic->value) {
             $this->applyPragma('synchronous', $open['synchronous_mode']);
-        } elseif ($open['path'] !== ':memory:' && $open['open_mode'] !== SqliteOpenMode::ReadOnly->name) {
+        } elseif ($open['path'] !== ':memory:'
+            && $open['open_mode'] !== SqliteOpenMode::ReadOnly->name
+            && ($open['journal_mode'] === SqliteJournalMode::Automatic->value || $open['journal_mode'] === SqliteJournalMode::Wal->value)
+        ) {
             $this->applyPragma('synchronous', 'normal');
         }
     }
