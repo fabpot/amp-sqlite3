@@ -19,6 +19,7 @@ use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
 use PHPUnit\Framework\TestCase;
+use function Amp\async;
 use function Amp\delay;
 
 final class SqliteStatementTest extends TestCase
@@ -130,5 +131,53 @@ final class SqliteStatementTest extends TestCase
 
         self::assertTrue($statement->isClosed());
         $transaction->commit();
+    }
+
+    public function testClosingStatementRejectsExecutionWaitingForConnection(): void
+    {
+        $statement = $this->connection->prepare('SELECT 1');
+        $transaction = $this->connection->beginTransaction();
+        $execution = async(fn () => $statement->execute());
+        delay(0);
+
+        self::assertFalse($execution->isComplete());
+        $statement->close();
+        $transaction->commit();
+
+        try {
+            $execution->await();
+            self::fail('Expected the closed statement execution to fail');
+        } catch (SqliteException $exception) {
+            self::assertSame('The SQLite statement is closed', $exception->getMessage());
+        }
+
+        self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
+    }
+
+    public function testClosingStatementRejectsActiveExecution(): void
+    {
+        $connection = (new SqliteConnector())->connect(
+            (new SqliteConfig(':memory:'))->withFunction('sleep_us', 'usleep', argCount: 1),
+        );
+
+        try {
+            $statement = $connection->prepare('SELECT sleep_us(100000)');
+            $execution = async(fn () => $statement->execute());
+            delay(0.01);
+
+            self::assertFalse($execution->isComplete());
+            $statement->close();
+
+            try {
+                $execution->await();
+                self::fail('Expected the closed statement execution to fail');
+            } catch (SqliteException $exception) {
+                self::assertSame('The SQLite statement is closed', $exception->getMessage());
+            }
+
+            self::assertSame(['answer' => 42], $connection->query('SELECT 42 AS answer')->fetchRow());
+        } finally {
+            $connection->close();
+        }
     }
 }

@@ -56,7 +56,13 @@ final class Statement implements SqliteStatement
 
         try {
             $this->activeResult?->close();
-            $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $this->transaction);
+            $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $this->transaction, $this);
+            if ($this->isClosed()) {
+                $result->close();
+
+                throw new SqliteException('The SQLite statement is closed');
+            }
+
             $this->lastUsedAt = \time();
             if (!$result->isClosed()) {
                 $this->activeResult = $result;

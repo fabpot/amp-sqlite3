@@ -26,6 +26,7 @@ use Fabpot\Amp\Sqlite\SqliteBlobStream;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
+use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
@@ -240,12 +241,18 @@ final class Connection implements SqliteConnection
         return $this->run($sql, $params, true, $transaction);
     }
 
-    public function executeStatement(int $statementId, string $sql, #[\SensitiveParameter] array $params, ?Transaction $transaction): SqliteResult
+    public function executeStatement(int $statementId, string $sql, #[\SensitiveParameter] array $params, ?Transaction $transaction, Statement $statement): SqliteResult
     {
         $this->assertOpen();
         self::validateParameterValues($params);
         $transactional = $transaction !== null;
         $lock = $this->acquire($transactional);
+
+        if ($statement->isClosed()) {
+            $this->releaseAcquired($lock, $transactional);
+
+            throw new SqliteException('The SQLite statement is closed');
+        }
 
         try {
             $value = $this->request('executeStatement', $sql, ['statement_id' => $statementId, 'params' => $params]);
