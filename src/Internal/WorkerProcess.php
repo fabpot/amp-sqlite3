@@ -565,7 +565,9 @@ final class WorkerProcess
     private function applyJournalMode(array $open): void
     {
         if ($open['journal_mode'] !== SqliteJournalMode::Automatic->value) {
-            $effective = $this->applyPragma('journal_mode', $open['journal_mode']);
+            $effective = $open['journal_mode'] === SqliteJournalMode::Wal->value
+                ? $this->enableWal($open['busy_timeout'])
+                : $this->applyPragma('journal_mode', $open['journal_mode']);
             if (\strtolower((string) $effective) !== $open['journal_mode']) {
                 throw new \RuntimeException("Could not enable requested journal mode '{$open['journal_mode']}'");
             }

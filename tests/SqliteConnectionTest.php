@@ -19,6 +19,7 @@ use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
 use Fabpot\Amp\Sqlite\SqliteOpenMode;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 use function Amp\delay;
@@ -148,7 +149,8 @@ final class SqliteConnectionTest extends TestCase
         }
     }
 
-    public function testConcurrentConnectionsCanInitializeNewDatabase(): void
+    #[DataProvider('provideWalModes')]
+    public function testConcurrentConnectionsCanInitializeNewDatabase(SqliteJournalMode $journalMode): void
     {
         $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
         $connector = new SqliteConnector();
@@ -157,7 +159,8 @@ final class SqliteConnectionTest extends TestCase
 
         try {
             for ($i = 0; $i < 10; ++$i) {
-                $futures[] = async(fn () => $connector->connect(new SqliteConfig($path)));
+                $config = (new SqliteConfig($path))->withJournalMode($journalMode);
+                $futures[] = async(fn () => $connector->connect($config));
             }
 
             foreach ($futures as $future) {
@@ -183,6 +186,12 @@ final class SqliteConnectionTest extends TestCase
             @\unlink($path . '-shm');
             @\unlink($path . '-wal');
         }
+    }
+
+    public static function provideWalModes(): iterable
+    {
+        yield 'automatic' => [SqliteJournalMode::Automatic];
+        yield 'explicit' => [SqliteJournalMode::Wal];
     }
 
     public function testReadOnlyConnectionPreservesJournalMode(): void
