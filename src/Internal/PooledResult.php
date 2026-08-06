@@ -21,7 +21,7 @@ use Fabpot\Amp\Sqlite\SqliteResult;
 /**
  * @internal
  *
- * @extends SqlPooledResult<null|bool|int|float|string|SqliteBlob, SqliteResult>
+ * @extends SqlPooledResult<null|int|float|string|SqliteBlob, SqliteResult>
  */
 final class PooledResult extends SqlPooledResult implements SqliteResult
 {

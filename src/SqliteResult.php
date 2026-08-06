@@ -17,7 +17,7 @@ use Amp\Closable;
 use Amp\Sql\SqlResult;
 
 /**
- * @extends SqlResult<null|bool|int|float|string|SqliteBlob>
+ * @extends SqlResult<null|int|float|string|SqliteBlob>
  */
 interface SqliteResult extends SqlResult, Closable
 {

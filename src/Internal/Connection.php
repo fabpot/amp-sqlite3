@@ -37,7 +37,7 @@ use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 /**
  * @internal
  *
- * @psalm-type RowValue = null|bool|int|float|string|SqliteBlob
+ * @psalm-type RowValue = null|int|float|string|SqliteBlob
  * @psalm-type Row = array<array-key, RowValue>
  * @psalm-type ResultPayload = array{
  *     result_id: int|null,
@@ -701,7 +701,6 @@ final class Connection implements SqliteConnection
     private static function isRowValue(mixed $value): bool
     {
         return $value === null
-            || \is_bool($value)
             || \is_int($value)
             || \is_float($value)
             || \is_string($value)

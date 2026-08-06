@@ -24,5 +24,8 @@ interface SqliteExecutor extends SqlExecutor
 
     public function prepare(string $sql): SqliteStatement;
 
-    public function execute(string $sql, array $params = []): SqliteResult;
+    /**
+     * Parameter values must be null, bool, int, float, string, or SqliteBlob.
+     */
+    public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult;
 }

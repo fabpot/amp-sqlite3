@@ -25,7 +25,8 @@ use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
  * @internal
  *
  * @psalm-type ParameterValue = null|bool|int|float|string|SqliteBlob
- * @psalm-type Row = array<array-key, ParameterValue>
+ * @psalm-type RowValue = null|int|float|string|SqliteBlob
+ * @psalm-type Row = array<array-key, RowValue>
  * @psalm-type InsertTarget = array{database: string, table: string}
  * @psalm-type StatementMetadata = array{insert: InsertTarget|null, ambiguous_insert: bool, update: bool, delete: bool}
  * @psalm-type OpenConfig = array{

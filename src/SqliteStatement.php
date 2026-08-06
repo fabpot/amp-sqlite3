@@ -20,5 +20,8 @@ use Amp\Sql\SqlStatement;
  */
 interface SqliteStatement extends SqlStatement
 {
-    public function execute(array $params = []): SqliteResult;
+    /**
+     * Parameter values must be null, bool, int, float, string, or SqliteBlob.
+     */
+    public function execute(#[\SensitiveParameter] array $params = []): SqliteResult;
 }
