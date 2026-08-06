@@ -14,6 +14,10 @@ declare(strict_types=1);
 namespace Fabpot\Amp\Sqlite\Test;
 
 use Amp\ByteStream\ClosedException;
+use Amp\ByteStream\PendingReadError;
+use Amp\CancelledException;
+use Amp\DeferredCancellation;
+use Fabpot\Amp\Sqlite\Internal\BlobStream;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
@@ -54,6 +58,67 @@ final class SqliteBlobStreamTest extends TestCase
         self::assertSame(808, \strlen($blob->read()));
         self::assertNull($blob->read());
         self::assertTrue($blob->isClosed());
+    }
+
+    public function testRejectsConcurrentReads(): void
+    {
+        $stream = new BlobStream(
+            2,
+            SqliteBlobMode::ReadOnly,
+            static function (): string {
+                delay(0.05);
+
+                return 'a';
+            },
+            static function (string $bytes): void {
+            },
+            static function (): void {
+            },
+        );
+        $first = async(fn () => $stream->read());
+        delay(0);
+
+        try {
+            $stream->read();
+            self::fail('Expected the concurrent read to fail');
+        } catch (PendingReadError) {
+        }
+
+        self::assertSame('a', $first->await());
+        $stream->close();
+    }
+
+    public function testCancellationDuringReadClosesBlobAfterDrainingResponse(): void
+    {
+        $closed = 0;
+        $stream = new BlobStream(
+            2,
+            SqliteBlobMode::ReadOnly,
+            static function (): string {
+                delay(0.05);
+
+                return 'a';
+            },
+            static function (string $bytes): void {
+            },
+            static function () use (&$closed): void {
+                ++$closed;
+            },
+        );
+        $cancellation = new DeferredCancellation();
+        $read = async(fn () => $stream->read($cancellation->getCancellation()));
+        delay(0);
+        $cancellation->cancel();
+
+        try {
+            $read->await();
+            self::fail('Expected the pending read to be cancelled');
+        } catch (CancelledException) {
+        }
+
+        self::assertTrue($stream->isClosed());
+        self::assertSame(0, $stream->getPosition());
+        self::assertSame(1, $closed);
     }
 
     public function testWritesIntoPreallocatedBlob(): void

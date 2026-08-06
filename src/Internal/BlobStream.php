@@ -14,8 +14,10 @@ declare(strict_types=1);
 namespace Fabpot\Amp\Sqlite\Internal;
 
 use Amp\ByteStream\ClosedException;
+use Amp\ByteStream\PendingReadError;
 use Amp\ByteStream\ReadableStreamIteratorAggregate;
 use Amp\Cancellation;
+use Amp\CancelledException;
 use Amp\DeferredFuture;
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
@@ -37,6 +39,7 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
 
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
+    private bool $readPending = false;
     private int $position = 0;
     private ?Transaction $transaction;
 
@@ -65,11 +68,15 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
 
     public function read(?Cancellation $cancellation = null): ?string
     {
-        $cancellation?->throwIfRequested();
+        if ($this->readPending) {
+            throw new PendingReadError();
+        }
 
         if ($this->closed) {
             return null;
         }
+
+        $cancellation?->throwIfRequested();
 
         if ($this->position === $this->length) {
             $this->close();
@@ -77,16 +84,33 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
             return null;
         }
 
-        $bytes = ($this->read)(\min($this->chunkSize, $this->length - $this->position));
-        if ($bytes === '') {
-            $this->close();
+        $this->readPending = true;
+        try {
+            $bytes = ($this->read)(\min($this->chunkSize, $this->length - $this->position));
 
-            return null;
+            try {
+                $cancellation?->throwIfRequested();
+            } catch (CancelledException $exception) {
+                try {
+                    $this->close();
+                } catch (\Throwable) {
+                }
+
+                throw $exception;
+            }
+
+            if ($bytes === '') {
+                $this->close();
+
+                return null;
+            }
+
+            $this->position += \strlen($bytes);
+
+            return $bytes;
+        } finally {
+            $this->readPending = false;
         }
-
-        $this->position += \strlen($bytes);
-
-        return $bytes;
     }
 
     public function write(string $bytes): void
