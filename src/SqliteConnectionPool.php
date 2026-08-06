@@ -15,6 +15,7 @@ namespace Fabpot\Amp\Sqlite;
 
 use Amp\Sql\Common\SqlCommonConnectionPool;
 use Amp\Sql\SqlConnector;
+use Amp\Sql\SqlException;
 use Amp\Sql\SqlResult;
 use Amp\Sql\SqlStatement;
 use Amp\Sql\SqlTransaction;
@@ -31,6 +32,8 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
 {
     /** @psalm-suppress InvalidClassConstantType The parent constant is not final and may be overridden. */
     public const DEFAULT_MAX_CONNECTIONS = 10;
+
+    private bool $closing = false;
 
     /**
      * @param positive-int $maxConnections
@@ -55,6 +58,16 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
             idleTimeout: $idleTimeout,
             transactionIsolation: $transactionIsolation ?? $config->getTransactionMode(),
         );
+    }
+
+    public function close(): void
+    {
+        if ($this->closing || parent::isClosed()) {
+            return;
+        }
+
+        $this->closing = true;
+        parent::close();
     }
 
     public function getTransactionIsolation(): SqliteTransactionMode
@@ -114,6 +127,7 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
 
     public function prepare(string $sql): SqliteStatement
     {
+        $this->throwIfClosed();
         $statement = parent::prepare($sql);
         \assert($statement instanceof SqliteStatement);
 
@@ -177,6 +191,32 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
         \assert($connection instanceof SqliteConnection);
 
         return $connection;
+    }
+
+    protected function pop(): SqliteConnection
+    {
+        $this->throwIfClosed();
+
+        try {
+            $connection = parent::pop();
+        } catch (SqlException|\Error $exception) {
+            if ($this->closing || parent::isClosed()) {
+                throw new SqliteConnectionException('The SQLite connection pool is closed', previous: $exception);
+            }
+
+            throw $exception;
+        }
+
+        \assert($connection instanceof SqliteConnection);
+
+        return $connection;
+    }
+
+    private function throwIfClosed(): void
+    {
+        if ($this->closing || parent::isClosed()) {
+            throw new SqliteConnectionException('The SQLite connection pool is closed');
+        }
     }
 
     protected function createResult(SqlResult $result, \Closure $release): SqliteResult

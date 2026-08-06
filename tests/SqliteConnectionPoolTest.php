@@ -15,7 +15,9 @@ namespace Fabpot\Amp\Sqlite\Test;
 
 use Amp\Sql\SqlTransactionIsolationLevel;
 use Fabpot\Amp\Sqlite\SqliteConfig;
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnectionPool;
+use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
@@ -47,6 +49,52 @@ final class SqliteConnectionPoolTest extends TestCase
         $this->expectException(\RuntimeException::class);
 
         new SqliteConnectionPool(new SqliteConfig(':memory:'));
+    }
+
+    public function testClosedPoolRejectsOperationsWithConnectionException(): void
+    {
+        $this->pool->close();
+
+        $operations = [
+            fn () => $this->pool->query('SELECT 1'),
+            fn () => $this->pool->execute('SELECT ?', [1]),
+            fn () => $this->pool->prepare('SELECT 1'),
+            fn () => $this->pool->beginTransaction(),
+            fn () => $this->pool->executeScript('SELECT 1'),
+            fn () => $this->pool->openBlob('entries', 'value', 1),
+            fn () => $this->pool->backup($this->path . '.backup'),
+            fn () => $this->pool->restore($this->path . '.backup'),
+            fn () => $this->pool->extractConnection(),
+        ];
+
+        foreach ($operations as $operation) {
+            try {
+                $operation();
+                self::fail('Expected the closed pool operation to fail');
+            } catch (SqliteConnectionException $exception) {
+                self::assertSame('The SQLite connection pool is closed', $exception->getMessage());
+            }
+        }
+    }
+
+    public function testClosingPoolRejectsWaitingOperationWithConnectionException(): void
+    {
+        $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize(1), maxConnections: 1);
+
+        try {
+            $result = $pool->query('SELECT 1 UNION ALL SELECT 2');
+            $waiting = async(fn () => $pool->query('SELECT 3'));
+            delay(0);
+            self::assertFalse($waiting->isComplete());
+
+            $pool->close();
+
+            $this->expectException(SqliteConnectionException::class);
+            $waiting->await();
+        } finally {
+            $result?->close();
+            $pool->close();
+        }
     }
 
     public function testUsesConfiguredTransactionModeByDefault(): void
@@ -370,6 +418,17 @@ final class SqliteConnectionPoolTest extends TestCase
         } finally {
             @\unlink($backupPath);
         }
+    }
+
+    public function testPooledFetchAfterExplicitResultCloseFails(): void
+    {
+        $result = $this->pool->query('SELECT 1');
+        $result->close();
+
+        $this->expectException(SqliteException::class);
+        $this->expectExceptionMessage('The SQLite result is closed');
+
+        $result->fetchRow();
     }
 
     public function testPooledResultExposesMetadata(): void

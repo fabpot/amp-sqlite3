@@ -40,6 +40,15 @@ final class PooledResult extends SqlPooledResult implements SqliteResult
         }
     }
 
+    public function fetchRow(): ?array
+    {
+        if ($this->result->isClosed()) {
+            return $this->result->fetchRow();
+        }
+
+        return parent::fetchRow();
+    }
+
     public function getNextResult(): ?SqliteResult
     {
         return parent::getNextResult();
@@ -58,7 +67,7 @@ final class PooledResult extends SqlPooledResult implements SqliteResult
     public function close(): void
     {
         $this->result->close();
-        while ($this->fetchRow() !== null) {
+        while (parent::fetchRow() !== null) {
         }
     }
 
