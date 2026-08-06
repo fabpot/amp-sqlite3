@@ -92,7 +92,7 @@ final class SqliteTransactionTest extends TestCase
 
     public function testRejectsGenericIsolationLevel(): void
     {
-        $this->expectException(\TypeError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         $this->connection->setTransactionIsolation(SqlTransactionIsolationLevel::Serializable);
     }

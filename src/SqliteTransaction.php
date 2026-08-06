@@ -20,4 +20,5 @@ use Amp\Sql\SqlTransaction;
  */
 interface SqliteTransaction extends SqliteLink, SqlTransaction
 {
+    public function getIsolation(): SqliteTransactionMode;
 }

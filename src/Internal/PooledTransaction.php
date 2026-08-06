@@ -125,10 +125,7 @@ final class PooledTransaction implements SqliteTransaction
 
     public function getIsolation(): SqliteTransactionMode
     {
-        $isolation = $this->transaction->getIsolation();
-        \assert($isolation instanceof SqliteTransactionMode);
-
-        return $isolation;
+        return $this->transaction->getIsolation();
     }
 
     public function isActive(): bool

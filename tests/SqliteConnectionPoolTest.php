@@ -130,7 +130,7 @@ final class SqliteConnectionPoolTest extends TestCase
 
     public function testRejectsGenericIsolationLevel(): void
     {
-        $this->expectException(\TypeError::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         $this->pool->setTransactionIsolation(SqlTransactionIsolationLevel::Serializable);
     }

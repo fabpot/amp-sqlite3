@@ -165,7 +165,7 @@ final class Connection implements SqliteConnection
         }
     }
 
-    public function getTransactionIsolation(): SqlTransactionIsolation
+    public function getTransactionIsolation(): SqliteTransactionMode
     {
         return $this->transactionMode;
     }
@@ -173,7 +173,7 @@ final class Connection implements SqliteConnection
     public function setTransactionIsolation(SqlTransactionIsolation $isolation): void
     {
         if (!$isolation instanceof SqliteTransactionMode) {
-            throw new \TypeError('SQLite connections only accept SqliteTransactionMode');
+            throw new \InvalidArgumentException('SQLite connections only accept SqliteTransactionMode');
         }
 
         $this->transactionMode = $isolation;

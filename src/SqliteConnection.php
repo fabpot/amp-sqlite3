@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace Fabpot\Amp\Sqlite;
 
 use Amp\Sql\SqlConnection;
+use Amp\Sql\SqlTransactionIsolation;
 
 /**
  * @extends SqlConnection<SqliteConfig, SqliteResult, SqliteStatement, SqliteTransaction>
@@ -21,6 +22,13 @@ use Amp\Sql\SqlConnection;
 interface SqliteConnection extends SqliteLink, SqlConnection
 {
     public function getConfig(): SqliteConfig;
+
+    public function getTransactionIsolation(): SqliteTransactionMode;
+
+    /**
+     * @throws \InvalidArgumentException If the isolation is not a SqliteTransactionMode.
+     */
+    public function setTransactionIsolation(SqlTransactionIsolation $isolation): void;
 
     /**
      * Executes one or more SQL statements without parameters.

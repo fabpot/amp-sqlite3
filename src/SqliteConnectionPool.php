@@ -79,7 +79,7 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
     public function setTransactionIsolation(SqlTransactionIsolation $isolation): void
     {
         if (!$isolation instanceof SqliteTransactionMode) {
-            throw new \TypeError('SQLite connection pools only accept SqliteTransactionMode');
+            throw new \InvalidArgumentException('SQLite connection pools only accept SqliteTransactionMode');
         }
 
         parent::setTransactionIsolation($isolation);
