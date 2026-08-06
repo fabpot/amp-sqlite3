@@ -302,6 +302,41 @@ final class SqliteConnectionPoolTest extends TestCase
         );
     }
 
+    public function testAbandonedTransactionStatementReleasesConnectionWithoutCycleCollection(): void
+    {
+        $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 1);
+
+        try {
+            $statement = $pool->beginTransaction()->prepare('SELECT 1');
+            unset($statement);
+            delay(0);
+
+            self::assertSame(1, $pool->getIdleConnectionCount());
+            self::assertSame(['answer' => 42], $pool->query('SELECT 42 AS answer')->fetchRow());
+        } finally {
+            $pool->close();
+        }
+    }
+
+    public function testIdleStatementCacheReleasesConnectionWithoutCycleCollection(): void
+    {
+        $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 2, idleTimeout: 10);
+
+        try {
+            $statement = $pool->prepare('SELECT 1 AS value');
+            self::assertSame(['value' => 1], $statement->execute()->fetchRow());
+            delay(0);
+            self::assertSame(0, $pool->getIdleConnectionCount());
+
+            delay(2.1);
+            delay(0);
+
+            self::assertSame(1, $pool->getIdleConnectionCount());
+        } finally {
+            $pool->close();
+        }
+    }
+
     public function testFinishingTransactionClosesPreparedStatementAndReleasesConnection(): void
     {
         $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 1);

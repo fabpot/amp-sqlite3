@@ -49,7 +49,8 @@ final class PooledStatement implements SqliteStatement
                 $release();
             }
         };
-        $this->statement->onClose(fn () => $this->dispose());
+        $reference = \WeakReference::create($this);
+        $this->statement->onClose(static fn () => $reference->get()?->dispose());
     }
 
     public function __destruct()
