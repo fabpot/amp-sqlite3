@@ -26,6 +26,8 @@ use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
  *
  * @psalm-type ParameterValue = null|bool|int|float|string|SqliteBlob
  * @psalm-type Row = array<array-key, ParameterValue>
+ * @psalm-type InsertTarget = array{database: string, table: string}
+ * @psalm-type StatementMetadata = array{insert: InsertTarget|null, ambiguous_insert: bool, update: bool, delete: bool}
  * @psalm-type OpenConfig = array{
  *     path: string,
  *     open_mode: string,
@@ -58,6 +60,9 @@ final class WorkerProcess
 
     /** @var array<int, \SQLite3Stmt> */
     private array $statements = [];
+
+    /** @var \WeakMap<\SQLite3Stmt, StatementMetadata> */
+    private \WeakMap $statementMetadata;
 
     /** @var array<int, array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: Row|null}> */
     private array $results = [];
@@ -121,6 +126,9 @@ final class WorkerProcess
         };
 
         $this->database = new \SQLite3($open['path'], $flags);
+        /** @var \WeakMap<\SQLite3Stmt, StatementMetadata> $statementMetadata */
+        $statementMetadata = new \WeakMap();
+        $this->statementMetadata = $statementMetadata;
         $this->database->enableExceptions(true);
         $this->database->enableExtendedResultCodes($open['extended_result_codes']);
         $this->database->busyTimeout($open['busy_timeout']);
@@ -557,6 +565,7 @@ final class WorkerProcess
     {
         /** @var int $before */
         $before = $this->database->querySingle('SELECT total_changes()');
+        $lastInsertIdBefore = $this->database->lastInsertRowID();
         if ($statementId !== null) {
             if (!isset($this->statements[$statementId])) {
                 throw new ProtocolError("Unknown statement ID '{$statementId}'");
@@ -579,19 +588,21 @@ final class WorkerProcess
             throw new \RuntimeException('Could not execute SQLite statement');
         }
         $columns = $nativeResult->numColumns();
-        /** @var int $after */
-        $after = $this->database->querySingle('SELECT total_changes()');
         $value = [
             'result_id' => null,
             'rows' => [],
             'exhausted' => true,
-            'row_count' => $columns > 0 ? null : $after - $before,
+            'row_count' => null,
             'column_count' => $columns ?: null,
             'column_names' => null,
-            'last_insert_id' => $this->database->lastInsertRowID(),
+            'last_insert_id' => null,
         ];
 
         if ($columns === 0) {
+            /** @var int $after */
+            $after = $this->database->querySingle('SELECT total_changes()');
+            $value['row_count'] = $after - $before;
+            $value['last_insert_id'] = $this->detectLastInsertId($statement, $lastInsertIdBefore);
             $nativeResult->finalize();
             if ($statementId === null) {
                 $statement->close();
@@ -719,7 +730,40 @@ final class WorkerProcess
 
     private function prepareSingleStatement(string $sql, string $error): \SQLite3Stmt
     {
-        $statement = $this->database->prepare($sql);
+        /** @var StatementMetadata $metadata */
+        $metadata = ['insert' => null, 'ambiguous_insert' => false, 'update' => false, 'delete' => false];
+        $this->database->setAuthorizer(static function (
+            int $action,
+            ?string $first = null,
+            ?string $second = null,
+            ?string $database = null,
+            ?string $source = null,
+        ) use (&$metadata): int {
+            if ($source !== null) {
+                return \SQLite3::OK;
+            }
+
+            if ($action === \SQLite3::INSERT && $first !== null && $database !== null) {
+                $target = ['database' => $database, 'table' => $first];
+                if ($metadata['insert'] !== null && $metadata['insert'] !== $target) {
+                    $metadata['ambiguous_insert'] = true;
+                } else {
+                    $metadata['insert'] = $target;
+                }
+            } elseif ($action === \SQLite3::UPDATE) {
+                $metadata['update'] = true;
+            } elseif ($action === \SQLite3::DELETE) {
+                $metadata['delete'] = true;
+            }
+
+            return \SQLite3::OK;
+        });
+
+        try {
+            $statement = $this->database->prepare($sql);
+        } finally {
+            $this->database->setAuthorizer(null);
+        }
         if (!$statement) {
             throw new \RuntimeException('SQL must contain an executable statement');
         }
@@ -732,8 +776,107 @@ final class WorkerProcess
             $statement->close();
             throw new \RuntimeException($error);
         }
+        if (($metadata['insert'] !== null || $metadata['update'] || $metadata['delete'])
+            && $this->hasResultRowOpcode($consumedSql)
+        ) {
+            $statement->close();
+            throw new \RuntimeException('DML statements with a RETURNING clause are not supported by the PHP SQLite3 extension');
+        }
+
+        $this->statementMetadata[$statement] = $metadata;
 
         return $statement;
+    }
+
+    private function hasResultRowOpcode(string $sql): bool
+    {
+        $statement = $this->database->prepare('EXPLAIN ' . $sql);
+        if (!$statement) {
+            return false;
+        }
+
+        try {
+            $result = $statement->execute();
+            if ($result === false) {
+                return false;
+            }
+
+            try {
+                while (($row = $result->fetchArray(SQLITE3_ASSOC)) !== false) {
+                    if (($row['opcode'] ?? null) === 'ResultRow') {
+                        return true;
+                    }
+                }
+            } finally {
+                $result->finalize();
+            }
+        } finally {
+            $statement->close();
+        }
+
+        return false;
+    }
+
+    private function detectLastInsertId(\SQLite3Stmt $statement, int $before): ?int
+    {
+        $metadata = $this->statementMetadata[$statement] ?? null;
+        $target = $metadata['insert'] ?? null;
+        if ($metadata === null
+            || $target === null
+            || $metadata['ambiguous_insert']
+            || $this->database->changes() === 0
+            || !$this->isOrdinaryRowIdTable($target)
+        ) {
+            return null;
+        }
+
+        $after = $this->database->lastInsertRowID();
+        if ($metadata['update'] && $after === $before) {
+            // An UPSERT may have updated an existing row without inserting one. If
+            // SQLite's connection-global value did not change, the branch is ambiguous.
+            return null;
+        }
+
+        return $after;
+    }
+
+    /**
+     * @param InsertTarget $target
+     */
+    private function isOrdinaryRowIdTable(array $target): bool
+    {
+        $database = '"' . \str_replace('"', '""', $target['database']) . '"';
+        $statement = $this->database->prepare("SELECT type, sql FROM {$database}.sqlite_schema WHERE name = :name");
+        if (!$statement) {
+            return false;
+        }
+
+        try {
+            $statement->bindValue(':name', $target['table'], SQLITE3_TEXT);
+            $result = $statement->execute();
+            if ($result === false) {
+                return false;
+            }
+
+            try {
+                $row = $result->fetchArray(SQLITE3_ASSOC);
+            } finally {
+                $result->finalize();
+            }
+        } finally {
+            $statement->close();
+        }
+
+        if ($row === false || ($row['type'] ?? null) !== 'table') {
+            return false;
+        }
+        $sql = $row['sql'] ?? null;
+        if (!\is_string($sql)) {
+            return false;
+        }
+
+        return !\preg_match('/\bCREATE\s+VIRTUAL\s+TABLE\b/i', $sql)
+            && !\preg_match('/\bWITHOUT(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))+ROWID\b/is', $sql);
     }
 
     private function applyPragma(string $name, bool|int|float|string $value): null|bool|int|float|string

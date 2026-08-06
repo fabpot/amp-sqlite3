@@ -23,7 +23,10 @@ interface SqliteResult extends SqlResult, Closable
 {
     public function getNextResult(): ?self;
 
-    public function getLastInsertId(): int;
+    /**
+     * Returns the row ID inserted by this result, or null if this result did not unambiguously insert a row.
+     */
+    public function getLastInsertId(): ?int;
 
     /**
      * @return list<string>|null Column names of a row-producing result, or null for a command result.

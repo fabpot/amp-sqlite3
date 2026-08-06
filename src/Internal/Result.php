@@ -49,7 +49,7 @@ final class Result implements SqliteResult, \IteratorAggregate
         private readonly ?int $rowCount,
         private readonly ?int $columnCount,
         private readonly ?array $columnNames,
-        private readonly int $lastInsertId,
+        private readonly ?int $lastInsertId,
         private readonly ?int $resultId,
         bool $exhausted,
         private readonly ?\Closure $fetch,
@@ -132,7 +132,7 @@ final class Result implements SqliteResult, \IteratorAggregate
         return $this->columnNames;
     }
 
-    public function getLastInsertId(): int
+    public function getLastInsertId(): ?int
     {
         return $this->lastInsertId;
     }

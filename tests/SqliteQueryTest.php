@@ -395,6 +395,88 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(0, $ddl->getRowCount());
     }
 
+    public function testLastInsertIdIsSpecificToTheResult(): void
+    {
+        $this->connection->query('CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT UNIQUE)');
+
+        self::assertSame(1, $this->connection->query("INSERT INTO entries (value) VALUES ('first')")->getLastInsertId());
+        self::assertNull($this->connection->query('SELECT * FROM entries')->getLastInsertId());
+        self::assertNull($this->connection->query("UPDATE entries SET value = 'updated' WHERE id = 1")->getLastInsertId());
+        self::assertNull($this->connection->query('CREATE TABLE other (id INTEGER PRIMARY KEY)')->getLastInsertId());
+        self::assertSame(1, $this->connection->query('INSERT INTO other (id) VALUES (1)')->getLastInsertId());
+        self::assertNull($this->connection->query("INSERT OR IGNORE INTO entries (id, value) VALUES (1, 'ignored')")->getLastInsertId());
+        self::assertSame(3, $this->connection->query("INSERT INTO entries (value) VALUES ('second'), ('third')")->getLastInsertId());
+        self::assertNull($this->connection->query("DELETE FROM entries WHERE value = 'second'")->getLastInsertId());
+    }
+
+    public function testLastInsertIdHandlesTriggersAndUpserts(): void
+    {
+        $this->connection->executeScript(<<<'SQL'
+            CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT UNIQUE);
+            CREATE TABLE audit (id INTEGER PRIMARY KEY, value TEXT);
+            CREATE TRIGGER audit_insert AFTER INSERT ON entries BEGIN
+                INSERT INTO audit (value) VALUES (NEW.value);
+            END;
+            SQL);
+
+        self::assertSame(10, $this->connection->query("INSERT INTO entries (id, value) VALUES (10, 'first')")->getLastInsertId());
+        self::assertNull($this->connection->query(<<<'SQL'
+            INSERT INTO entries (id, value) VALUES (11, 'first')
+            ON CONFLICT(value) DO UPDATE SET value = excluded.value
+            SQL)->getLastInsertId());
+        self::assertSame(12, $this->connection->query(<<<'SQL'
+            INSERT INTO entries (id, value) VALUES (12, 'second')
+            ON CONFLICT(value) DO UPDATE SET value = excluded.value
+            SQL)->getLastInsertId());
+    }
+
+    public function testLastInsertIdIsNullForNonRowIdInsertsAndRejectsReturning(): void
+    {
+        $this->connection->executeScript(<<<'SQL'
+            CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT);
+            CREATE TABLE keyed (id TEXT PRIMARY KEY) WITHOUT ROWID;
+            CREATE VIEW entry_view AS SELECT id, value FROM entries;
+            CREATE TRIGGER entry_view_insert INSTEAD OF INSERT ON entry_view BEGIN
+                INSERT INTO entries (id, value) VALUES (NEW.id, NEW.value);
+            END;
+            SQL);
+
+        self::assertNull($this->connection->query("INSERT INTO keyed VALUES ('key')")->getLastInsertId());
+        self::assertNull($this->connection->query("INSERT INTO entry_view VALUES (20, 'view')")->getLastInsertId());
+
+        try {
+            $this->connection->query("INSERT INTO entries (id, value) VALUES (21, 'returning') RETURNING id");
+            self::fail('Expected the unsafe RETURNING statement to be rejected');
+        } catch (SqliteQueryError $error) {
+            self::assertSame(
+                'DML statements with a RETURNING clause are not supported by the PHP SQLite3 extension',
+                $error->getMessage(),
+            );
+        }
+        self::assertNull($this->connection->query('SELECT id FROM entries WHERE id = 21')->fetchRow());
+    }
+
+    public function testPreparedInsertReportsOnlyIdsFromAffectedRows(): void
+    {
+        $this->connection->query('CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT UNIQUE)');
+        $statement = $this->connection->prepare('INSERT OR IGNORE INTO entries (id, value) VALUES (?, ?)');
+
+        self::assertSame(5, $statement->execute([5, 'value'])->getLastInsertId());
+        self::assertNull($statement->execute([6, 'value'])->getLastInsertId());
+    }
+
+    public function testLastInsertIdSupportsTemporaryAndAttachedTables(): void
+    {
+        $this->connection->executeScript(<<<'SQL'
+            CREATE TEMP TABLE temporary_entries (id INTEGER PRIMARY KEY);
+            ATTACH DATABASE ':memory:' AS auxiliary;
+            CREATE TABLE auxiliary.entries (id INTEGER PRIMARY KEY);
+            SQL);
+
+        self::assertSame(1, $this->connection->query('INSERT INTO temporary_entries DEFAULT VALUES')->getLastInsertId());
+        self::assertSame(1, $this->connection->query('INSERT INTO auxiliary.entries DEFAULT VALUES')->getLastInsertId());
+    }
+
     public function testReportsColumnNames(): void
     {
         $result = $this->connection->query('SELECT 1 AS id, 2 AS value, 3 AS "complex name"');

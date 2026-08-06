@@ -54,7 +54,7 @@ final class PooledResult extends SqlPooledResult implements SqliteResult
         return parent::getNextResult();
     }
 
-    public function getLastInsertId(): int
+    public function getLastInsertId(): ?int
     {
         return $this->result->getLastInsertId();
     }

@@ -46,7 +46,7 @@ use Fabpot\Amp\Sqlite\SqliteTransactionMode;
  *     row_count: int|null,
  *     column_count: int|null,
  *     column_names: list<string>|null,
- *     last_insert_id: int
+ *     last_insert_id: int|null
  * }
  * @psalm-type BatchPayload = array{rows: list<Row>, exhausted: bool}
  */
@@ -582,7 +582,8 @@ final class Connection implements SqliteConnection
             || ($value['column_count'] !== null && !\is_int($value['column_count']))
             || !\array_key_exists('column_names', $value)
             || !self::isStringListOrNull($value['column_names'])
-            || !\is_int($value['last_insert_id'] ?? null)
+            || !\array_key_exists('last_insert_id', $value)
+            || ($value['last_insert_id'] !== null && !\is_int($value['last_insert_id']))
         ) {
             $this->invalidResponse();
         }
