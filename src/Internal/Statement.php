@@ -35,7 +35,7 @@ final class Statement implements SqliteStatement
         private readonly Connection $connection,
         private readonly int $statementId,
         private readonly string $query,
-        private readonly ?Transaction $transaction,
+        private ?Transaction $transaction,
     ) {
         $this->onClose = new DeferredFuture();
         $this->lastUsedAt = \time();
@@ -94,9 +94,16 @@ final class Statement implements SqliteStatement
         }
 
         $this->closed = true;
-        $this->activeResult?->close();
-        $this->connection->closeStatement($this->statementId, $this->query);
-        $this->onClose->complete();
+        try {
+            $this->activeResult?->close();
+        } finally {
+            try {
+                $this->connection->closeStatement($this->statementId, $this->query);
+            } finally {
+                $this->transaction = null;
+                $this->onClose->complete();
+            }
+        }
     }
 
     public function isClosed(): bool

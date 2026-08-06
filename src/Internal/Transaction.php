@@ -36,6 +36,10 @@ final class Transaction implements SqliteTransaction
     private readonly DeferredFuture $onRollback;
     private readonly DeferredFuture $onClose;
     private readonly LocalMutex $stateMutex;
+
+    /** @var \WeakMap<Statement, true> */
+    private \WeakMap $statements;
+
     private bool $active = true;
     private int $nextSavepointId = 1;
     private ?Transaction $activeNested = null;
@@ -51,6 +55,9 @@ final class Transaction implements SqliteTransaction
         $this->onRollback = new DeferredFuture();
         $this->onClose = new DeferredFuture();
         $this->stateMutex = new LocalMutex();
+        /** @var \WeakMap<Statement, true> $statements */
+        $statements = new \WeakMap();
+        $this->statements = $statements;
     }
 
     public function __destruct()
@@ -90,7 +97,11 @@ final class Transaction implements SqliteTransaction
         $lock = $this->acquireOperation();
 
         try {
-            return $this->connection->prepareInTransaction($sql, $this);
+            $statement = $this->connection->prepareInTransaction($sql, $this);
+            \assert($statement instanceof Statement);
+            $this->statements[$statement] = true;
+
+            return $statement;
         } finally {
             $lock->release();
         }
@@ -155,6 +166,7 @@ final class Transaction implements SqliteTransaction
             $this->assertActive();
             $this->connection->executeControl($this->savepoint === null ? 'COMMIT' : "RELEASE SAVEPOINT {$this->savepoint}");
             $this->active = false;
+            $this->closeStatements();
             $this->parent?->releaseNested($this);
             if ($this->parent === null) {
                 $this->onCommit->complete();
@@ -210,6 +222,7 @@ final class Transaction implements SqliteTransaction
 
             if ($this->connection->isClosed()) {
                 $this->active = false;
+                $this->closeStatements();
                 $this->onRollback->complete();
                 $this->onClose->complete();
 
@@ -238,6 +251,7 @@ final class Transaction implements SqliteTransaction
         $nested = $this->activeNested;
         if ($this->active) {
             $this->active = false;
+            $this->closeStatements();
             $this->parent?->releaseNested($this);
             $this->onRollback->complete();
             $this->onClose->complete();
@@ -265,11 +279,22 @@ final class Transaction implements SqliteTransaction
         }
 
         $this->active = false;
+        $this->closeStatements();
         $this->parent?->releaseNested($this);
         $this->onRollback->complete();
         $this->onClose->complete();
         if ($this->savepoint === null) {
             $this->connection->releaseTransaction($this);
+        }
+    }
+
+    private function closeStatements(): void
+    {
+        foreach ($this->statements as $statement => $_) {
+            try {
+                $statement->close();
+            } catch (\Throwable) {
+            }
         }
     }
 

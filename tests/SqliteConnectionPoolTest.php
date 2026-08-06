@@ -237,6 +237,23 @@ final class SqliteConnectionPoolTest extends TestCase
         );
     }
 
+    public function testFinishingTransactionClosesPreparedStatementAndReleasesConnection(): void
+    {
+        $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 1);
+
+        try {
+            $transaction = $pool->beginTransaction();
+            $statement = $transaction->prepare('SELECT 1');
+            $transaction->commit();
+            delay(0);
+
+            self::assertTrue($statement->isClosed());
+            self::assertSame(['answer' => 42], $pool->query('SELECT 42 AS answer')->fetchRow());
+        } finally {
+            $pool->close();
+        }
+    }
+
     public function testNestedTransactionsOnPooledConnection(): void
     {
         $transaction = $this->pool->beginTransaction();

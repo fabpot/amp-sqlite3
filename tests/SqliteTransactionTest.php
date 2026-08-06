@@ -17,6 +17,8 @@ use Amp\Sql\SqlTransactionIsolationLevel;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteException;
+use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
@@ -48,6 +50,34 @@ final class SqliteTransactionTest extends TestCase
         $transaction->rollback();
 
         self::assertSame([['value' => 'committed']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testFinishingTransactionClosesPreparedStatements(): void
+    {
+        $committed = $this->connection->beginTransaction();
+        $committedStatement = $committed->prepare('SELECT 1');
+        $committedClosed = 0;
+        $committedStatement->onClose(static function () use (&$committedClosed): void {
+            ++$committedClosed;
+        });
+        $committed->commit();
+
+        $rolledBack = $this->connection->beginTransaction();
+        $rolledBackStatement = $rolledBack->prepare('SELECT 1');
+        $rolledBackClosed = 0;
+        $rolledBackStatement->onClose(static function () use (&$rolledBackClosed): void {
+            ++$rolledBackClosed;
+        });
+        $rolledBack->rollback();
+        delay(0);
+
+        self::assertTrue($committedStatement->isClosed());
+        self::assertTrue($rolledBackStatement->isClosed());
+        self::assertSame(1, $committedClosed);
+        self::assertSame(1, $rolledBackClosed);
+
+        $this->expectException(SqliteException::class);
+        $committedStatement->execute();
     }
 
     public function testUsesConfiguredTransactionMode(): void
@@ -202,11 +232,14 @@ final class SqliteTransactionTest extends TestCase
         try {
             $execute->await();
             self::fail('Expected statement execution after commit to be rejected');
-        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
-            self::assertSame('The transaction has been committed or rolled back', $error->getMessage());
+        } catch (SqliteException|SqliteTransactionError $error) {
+            self::assertContains($error->getMessage(), [
+                'The SQLite statement is closed',
+                'The transaction has been committed or rolled back',
+            ]);
         }
 
-        $statement->close();
+        self::assertTrue($statement->isClosed());
         self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
@@ -225,11 +258,11 @@ final class SqliteTransactionTest extends TestCase
         try {
             $statement->execute(['after commit']);
             self::fail('Expected the statement execution to fail');
-        } catch (\Fabpot\Amp\Sqlite\SqliteTransactionError $error) {
-            self::assertSame('The transaction has been committed or rolled back', $error->getMessage());
+        } catch (SqliteException $error) {
+            self::assertSame('The SQLite statement is closed', $error->getMessage());
         }
 
-        $statement->close();
+        self::assertTrue($statement->isClosed());
         self::assertSame([['value' => 'after nested']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 

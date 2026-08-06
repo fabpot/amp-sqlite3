@@ -49,6 +49,7 @@ final class PooledStatement implements SqliteStatement
                 $release();
             }
         };
+        $this->statement->onClose(fn () => $this->dispose());
     }
 
     public function __destruct()
