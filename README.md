@@ -64,7 +64,7 @@ $config = (new SqliteConfig(__DIR__ . '/database.sqlite'))
 
 Additional pragmas default to none and can be configured as needed, for example with `->withPragma('cache_size', -8_000)`. `SqliteConfig` is immutable; every `with*()` method returns a new instance. Invalid combinations (e.g. an explicit journal mode on a read-only database) are rejected. Pragmas with a dedicated option (`journal_mode`, `synchronous`, `foreign_keys`, `busy_timeout`, `trusted_schema`) cannot be set through `withPragma()`.
 
-Connection pools use the configured transaction mode by default. Pass `transactionIsolation` to the pool constructor or call `setTransactionIsolation()` to override it. `Deferred`, `Immediate`, and `Exclusive` are SQLite `BEGIN` locking modes, not portable SQL isolation levels. Consequently, SQLite connections only accept `SqliteTransactionMode`; passing another `Amp\Sql\SqlTransactionIsolation` implementation throws `InvalidArgumentException`.
+Connection pools use the configured transaction mode by default. Pass `transactionIsolation` to the pool constructor or call `setTransactionIsolation()` to override it. `Deferred`, `Immediate`, and `Exclusive` are SQLite `BEGIN` locking modes, not portable SQL isolation levels. Consequently, SQLite connections only accept `SqliteTransactionMode`; passing another `Amp\Sql\SqlTransactionIsolation` implementation to `setTransactionIsolation()` throws `InvalidArgumentException`. APIs declared directly with a `SqliteTransactionMode` parameter use PHP's normal `TypeError` behavior.
 
 Use `getPath()` and `withPath()` to read or change the database path. The inherited `getDatabase()` and `withDatabase()` methods are supported aliases required by AMPHP's SQL configuration API, and their values are revalidated before connecting. The inherited host, port, user, and password options are not supported and cause `InvalidArgumentException` when connecting.
 
@@ -130,7 +130,7 @@ The driver accepts SQLite's native anonymous (`?`), numbered (`?NNN`), and named
 
 Parameter values must be `null`, `bool`, `int`, `float`, `string`, or `SqliteBlob`; anything else throws a `TypeError`. Booleans are bound as integers.
 
-The driver accepts one SQL statement per `query()` or `execute()` operation. Empty SQL and multiple statements are rejected. DML statements containing a `RETURNING` clause are also rejected before execution because PHP's `SQLite3` extension can execute them twice while fetching their result rows.
+The driver accepts one SQL statement per `query()` or `execute()` operation. Empty SQL and multiple statements are rejected. Row-producing DML is also rejected before execution because PHP's `SQLite3` extension can execute it twice while fetching result rows. This includes DML with a `RETURNING` clause and DML made row-producing by `PRAGMA count_changes`.
 
 Use `executeScript()` for parameterless schema or migration scripts containing multiple statements:
 
@@ -345,13 +345,13 @@ Register lifecycle callbacks with `onCommit()` and `onRollback()`. Committing a 
 
 Version 1.0 freezes several contracts that were implicit or inconsistent in the preview releases:
 
-- `query()` and `execute()` accept exactly one statement. Use atomic `executeScript()` for multi-statement, parameterless scripts. DML `RETURNING` clauses are rejected before execution.
+- `query()` and `execute()` accept exactly one statement. Use atomic `executeScript()` for multi-statement, parameterless scripts. Row-producing DML, including `RETURNING`, is rejected before execution.
 - `getLastInsertId()` now returns `?int` and only reports an ID attributable to that result; check for `null` before using it.
 - Results and statements throw `SqliteException` after explicit closure. Direct and pooled results now behave identically.
 - Statements prepared through a transaction close when that transaction finishes. Do not retain them for later execution.
 - Closed pools and queued operations interrupted by pool closure throw `SqliteConnectionException`.
 - `SqliteQueryError` result-code getters now return `?int`. Non-SQL SQLite operations use `SqliteException` instead of `SqliteQueryError`.
-- SQLite transaction getters return `SqliteTransactionMode`; other AMPHP isolation implementations are rejected with `InvalidArgumentException`.
+- SQLite transaction getters return `SqliteTransactionMode`; `setTransactionIsolation()` rejects other AMPHP isolation implementations with `InvalidArgumentException`.
 - Prefer `SqliteConfig::getPath()` and `withPath()`. The former public `validatePath()` helper was implementation detail and has been removed. Invalid configuration combinations now consistently throw `InvalidArgumentException`.
 - SQLite result rows contain `null`, `int`, `float`, `string`, or `SqliteBlob`; numeric column names become integer PHP keys.
 
