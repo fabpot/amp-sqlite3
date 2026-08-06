@@ -5,6 +5,17 @@
     bootstrap="vendor/autoload.php"
     cacheDirectory=".phpunit.cache"
     colors="true"
+    failOnDeprecation="true"
+    failOnNotice="true"
+    failOnWarning="true"
+    failOnPhpunitDeprecation="true"
+    failOnPhpunitNotice="true"
+    failOnPhpunitWarning="true"
+    displayDetailsOnTestsThatTriggerDeprecations="true"
+    displayDetailsOnTestsThatTriggerNotices="true"
+    displayDetailsOnTestsThatTriggerWarnings="true"
+    displayDetailsOnPhpunitDeprecations="true"
+    displayDetailsOnPhpunitNotices="true"
 >
     <testsuites>
         <testsuite name="AMPHP SQLite">
