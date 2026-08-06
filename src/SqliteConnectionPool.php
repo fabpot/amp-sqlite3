@@ -29,6 +29,7 @@ use Fabpot\Amp\Sqlite\Internal\StatementPool;
  */
 final class SqliteConnectionPool extends SqlCommonConnectionPool implements SqliteConnection
 {
+    /** @psalm-suppress InvalidClassConstantType The parent constant is not final and may be overridden. */
     public const DEFAULT_MAX_CONNECTIONS = 10;
 
     /**

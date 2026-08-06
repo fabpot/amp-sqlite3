@@ -42,7 +42,9 @@ final class StatementPool implements SqliteStatement
         private readonly \Closure $prepare,
     ) {
         $this->lastUsedAt = \time();
-        $this->statements = $statements = new \SplQueue();
+        /** @var \SplQueue<SqliteStatement> $statements */
+        $statements = new \SplQueue();
+        $this->statements = $statements;
         $this->onClose = new DeferredFuture();
 
         $timeoutWatcher = EventLoop::repeat(1, static function () use ($pool, $statements): void {

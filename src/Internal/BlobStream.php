@@ -40,6 +40,11 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
     private int $position = 0;
     private ?Transaction $transaction;
 
+    /**
+     * @param \Closure(int):string $read
+     * @param \Closure(string):void $write
+     * @param \Closure():void $close
+     */
     public function __construct(
         private readonly int $length,
         private readonly SqliteBlobMode $mode,

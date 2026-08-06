@@ -24,7 +24,7 @@ use Fabpot\Amp\Sqlite\SqliteResult;
 /**
  * @internal
  *
- * @implements \IteratorAggregate<int, array<string, null|bool|int|float|string|SqliteBlob>>
+ * @implements \IteratorAggregate<int, array<array-key, null|bool|int|float|string|SqliteBlob>>
  */
 final class Result implements SqliteResult, \IteratorAggregate
 {
@@ -38,9 +38,9 @@ final class Result implements SqliteResult, \IteratorAggregate
     private ?Transaction $transaction;
 
     /**
-     * @param list<array<string, null|bool|int|float|string|SqliteBlob>> $rows
+     * @param list<array<array-key, null|bool|int|float|string|SqliteBlob>> $rows
      * @param list<string>|null $columnNames
-     * @param null|\Closure(int):array{rows: list<array<string, null|bool|int|float|string|SqliteBlob>>, exhausted: bool} $fetch
+     * @param null|\Closure(int):array{rows: list<array<array-key, null|bool|int|float|string|SqliteBlob>>, exhausted: bool} $fetch
      * @param null|\Closure(int):void $close
      * @param null|\Closure():void $onRelease
      */
@@ -72,6 +72,9 @@ final class Result implements SqliteResult, \IteratorAggregate
         $this->close();
     }
 
+    /**
+     * @psalm-suppress MixedReturnTypeCoercion PHP converts numeric column names to integer array keys.
+     */
     public function fetchRow(): ?array
     {
         if ($this->closed) {
