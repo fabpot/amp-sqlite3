@@ -81,6 +81,28 @@ final class SqliteStatementTest extends TestCase
         );
     }
 
+    public function testConnectionCloseInvalidatesStatementAndActiveResult(): void
+    {
+        $statement = $this->connection->prepare('SELECT 1 UNION ALL SELECT 2');
+        $result = $statement->execute();
+        $statementClosed = 0;
+        $resultClosed = 0;
+        $statement->onClose(static function () use (&$statementClosed): void {
+            ++$statementClosed;
+        });
+        $result->onClose(static function () use (&$resultClosed): void {
+            ++$resultClosed;
+        });
+
+        $this->connection->close();
+        delay(0);
+
+        self::assertTrue($statement->isClosed());
+        self::assertTrue($result->isClosed());
+        self::assertSame(1, $statementClosed);
+        self::assertSame(1, $resultClosed);
+    }
+
     public function testCloseIsIdempotentAndPreventsExecution(): void
     {
         $statement = $this->connection->prepare('SELECT 1');

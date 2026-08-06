@@ -410,6 +410,42 @@ final class SqliteTransactionTest extends TestCase
         }
     }
 
+    public function testConnectionCloseReleasesTransactionOperationWaitingForResult(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $result = $transaction->query('SELECT 1 UNION ALL SELECT 2');
+        $future = async(fn () => $transaction->query('SELECT 3'));
+        delay(0);
+
+        self::assertFalse($future->isComplete());
+        $this->connection->close();
+        delay(0);
+
+        self::assertTrue($future->isComplete());
+        self::assertTrue($result->isClosed());
+        self::assertFalse($transaction->isActive());
+
+        $this->expectException(\Fabpot\Amp\Sqlite\SqliteTransactionError::class);
+        $future->await();
+    }
+
+    public function testConnectionCloseReleasesOperationWaitingForTransaction(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $future = async(fn () => $this->connection->query('SELECT 1'));
+        delay(0);
+
+        self::assertFalse($future->isComplete());
+        $this->connection->close();
+        delay(0);
+
+        self::assertTrue($future->isComplete());
+        self::assertFalse($transaction->isActive());
+
+        $this->expectException(\Fabpot\Amp\Sqlite\SqliteConnectionException::class);
+        $future->await();
+    }
+
     public function testBeginTransactionFailsOnClosedConnection(): void
     {
         $this->connection->close();
@@ -494,15 +530,5 @@ final class SqliteTransactionTest extends TestCase
         \gc_collect_cycles();
 
         self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
-    }
-}
-
-final class RecordingProcessContextFactory implements \Amp\Parallel\Context\ContextFactory
-{
-    public \Amp\Parallel\Context\ProcessContext $context;
-
-    public function start(string|array $script, ?\Amp\Cancellation $cancellation = null): \Amp\Parallel\Context\Context
-    {
-        return $this->context = (new \Amp\Parallel\Context\ProcessContextFactory())->start($script, $cancellation);
     }
 }

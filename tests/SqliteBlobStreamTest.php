@@ -16,10 +16,12 @@ namespace Fabpot\Amp\Sqlite\Test;
 use Amp\ByteStream\ClosedException;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteConfig;
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 use function Amp\ByteStream\buffer;
+use function Amp\delay;
 
 final class SqliteBlobStreamTest extends TestCase
 {
@@ -114,6 +116,60 @@ final class SqliteBlobStreamTest extends TestCase
         $this->connection->query('INSERT INTO files VALUES (zeroblob(0))');
 
         self::assertSame('', buffer($this->connection->openBlob('files', 'contents', 1)));
+    }
+
+    public function testProcessFailureInvalidatesBlobAndReleasesWaitingOperation(): void
+    {
+        $factory = new RecordingProcessContextFactory();
+        $connection = (new SqliteConnector($factory))->connect(new SqliteConfig(':memory:'));
+        $connection->query('CREATE TABLE files (contents BLOB)');
+        $connection->query("INSERT INTO files VALUES (zeroblob(4))");
+        $blob = $connection->openBlob('files', 'contents', 1);
+        $closed = 0;
+        $blob->onClose(static function () use (&$closed): void {
+            ++$closed;
+        });
+        $future = async(fn () => $connection->query('SELECT 1'));
+        delay(0);
+        self::assertFalse($future->isComplete());
+
+        $factory->context->close();
+        try {
+            $blob->read();
+            self::fail('Expected the child-process failure to close the BLOB');
+        } catch (SqliteConnectionException) {
+        }
+        delay(0);
+
+        self::assertTrue($future->isComplete());
+        self::assertTrue($blob->isClosed());
+        self::assertSame(1, $closed);
+
+        $this->expectException(SqliteConnectionException::class);
+        $future->await();
+    }
+
+    public function testConnectionCloseInvalidatesBlobAndReleasesWaitingOperation(): void
+    {
+        $this->connection->query("INSERT INTO files VALUES (zeroblob(4))");
+        $blob = $this->connection->openBlob('files', 'contents', 1);
+        $closed = 0;
+        $blob->onClose(static function () use (&$closed): void {
+            ++$closed;
+        });
+        $future = async(fn () => $this->connection->query('SELECT 1'));
+        delay(0);
+
+        self::assertFalse($future->isComplete());
+        $this->connection->close();
+        delay(0);
+
+        self::assertTrue($future->isComplete());
+        self::assertTrue($blob->isClosed());
+        self::assertSame(1, $closed);
+
+        $this->expectException(SqliteConnectionException::class);
+        $future->await();
     }
 
     public function testCloseIsIdempotent(): void

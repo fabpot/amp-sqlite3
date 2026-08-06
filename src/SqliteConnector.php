@@ -76,7 +76,7 @@ final class SqliteConnector implements SqlConnector
             ]);
             $ready = $context->receive($cancellation);
 
-            if (($ready['ready'] ?? false) !== true) {
+            if (!\is_array($ready) || $ready !== ['ready' => true]) {
                 throw new SqliteConnectionException('The SQLite child process sent an invalid startup response');
             }
         } catch (\RuntimeException $exception) {

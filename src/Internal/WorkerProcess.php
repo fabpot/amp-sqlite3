@@ -23,6 +23,24 @@ use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
  * Runs inside the child process and executes protocol operations against the native SQLite3 connection.
  *
  * @internal
+ *
+ * @psalm-type ParameterValue = null|bool|int|float|string|SqliteBlob
+ * @psalm-type Row = array<array-key, ParameterValue>
+ * @psalm-type OpenConfig = array{
+ *     path: string,
+ *     open_mode: string,
+ *     journal_mode: string,
+ *     synchronous_mode: string,
+ *     foreign_keys: bool,
+ *     busy_timeout: int,
+ *     batch_size: positive-int,
+ *     trusted_schema: bool,
+ *     extended_result_codes: bool,
+ *     pragmas: array<string, bool|int|float|string>,
+ *     functions: array<string, array{callback: string, arg_count: int, deterministic: bool}>,
+ *     aggregates: array<string, array{step: string, final: string, arg_count: int}>,
+ *     collations: array<string, string>
+ * }
  */
 final class WorkerProcess
 {
@@ -41,33 +59,57 @@ final class WorkerProcess
     /** @var array<int, \SQLite3Stmt> */
     private array $statements = [];
 
-    /** @var array<int, array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: array<string, mixed>|null}> */
+    /** @var array<int, array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: Row|null}> */
     private array $results = [];
 
     /**
-     * @param array{
-     *     path: string,
-     *     open_mode: string,
-     *     journal_mode: string,
-     *     synchronous_mode: string,
-     *     foreign_keys: bool,
-     *     busy_timeout: int,
-     *     batch_size: positive-int,
-     *     trusted_schema: bool,
-     *     extended_result_codes: bool,
-     *     pragmas: array<string, bool|int|float|string>,
-     *     functions: array<string, array{callback: string, arg_count: int, deterministic: bool}>,
-     *     aggregates: array<string, array{step: string, final: string, arg_count: int}>,
-     *     collations: array<string, string>
-     * } $open
+     * @return OpenConfig
      */
-    public function __construct(array $open)
+    public static function validateOpen(mixed $open): array
     {
+        if (!\is_array($open)
+            || !\is_string($open['path'] ?? null)
+            || !\is_string($open['open_mode'] ?? null)
+            || !\is_string($open['journal_mode'] ?? null)
+            || !\is_string($open['synchronous_mode'] ?? null)
+            || !\is_bool($open['foreign_keys'] ?? null)
+            || !\is_int($open['busy_timeout'] ?? null)
+            || $open['busy_timeout'] < 0
+            || !\is_int($open['batch_size'] ?? null)
+            || $open['batch_size'] < 1
+            || !\is_bool($open['trusted_schema'] ?? null)
+            || !\is_bool($open['extended_result_codes'] ?? null)
+            || !self::isPragmaMap($open['pragmas'] ?? null)
+            || !self::isFunctionMap($open['functions'] ?? null)
+            || !self::isAggregateMap($open['aggregates'] ?? null)
+            || !self::isCollationMap($open['collations'] ?? null)
+        ) {
+            throw new ProtocolError('Invalid SQLite startup payload');
+        }
+
+        if (!\in_array($open['open_mode'], \array_column(SqliteOpenMode::cases(), 'name'), true)
+            || !\in_array($open['journal_mode'], \array_column(SqliteJournalMode::cases(), 'value'), true)
+            || !\in_array($open['synchronous_mode'], \array_column(SqliteSynchronousMode::cases(), 'value'), true)
+        ) {
+            throw new ProtocolError('Invalid SQLite startup mode');
+        }
+
+        /** @var OpenConfig $open */
+        return $open;
+    }
+
+    public function __construct(mixed $open)
+    {
+        $open = self::validateOpen($open);
+
         if (!\extension_loaded('sqlite3')) {
             throw new \RuntimeException('The sqlite3 extension is not loaded');
         }
 
-        $version = \SQLite3::version()['versionString'];
+        $version = \SQLite3::version()['versionString'] ?? null;
+        if (!\is_string($version)) {
+            throw new \RuntimeException('Could not determine the SQLite version');
+        }
         if (\version_compare($version, '3.31.0', '<')) {
             throw new \RuntimeException("SQLite 3.31.0 or newer is required, {$version} is installed");
         }
@@ -103,21 +145,27 @@ final class WorkerProcess
      */
     public function handle(array $request): mixed
     {
-        return match ($request['operation']) {
+        $operation = self::requireString($request, 'operation');
+
+        return match ($operation) {
             'close' => $this->close(),
-            'backup' => $this->backup($request['path'], $request['database']),
-            'restore' => $this->restore($request['path'], $request['database']),
+            'backup' => $this->backup(self::requireString($request, 'path'), self::requireString($request, 'database')),
+            'restore' => $this->restore(self::requireString($request, 'path'), self::requireString($request, 'database')),
             'openBlob' => $this->openBlob($request),
-            'readBlob' => $this->readBlob($request['blob_id'], $request['length']),
-            'writeBlob' => $this->writeBlob($request['blob_id'], $request['bytes']),
-            'closeBlob' => $this->closeBlob($request['blob_id']),
-            'prepare' => $this->prepare($request['sql']),
-            'closeStatement' => $this->closeStatement($request['statement_id']),
-            'fetch' => $this->fetch($request['result_id']),
-            'closeResult' => $this->closeResult($request['result_id']),
-            'execute', 'executeStatement' => $this->execute($request),
-            'executeScript' => $this->executeScript($request['sql'], $request['transaction_mode']),
-            default => throw new ProtocolError("Unknown operation '{$request['operation']}'"),
+            'readBlob' => $this->readBlob(self::requirePositiveInt($request, 'blob_id'), self::requirePositiveInt($request, 'length')),
+            'writeBlob' => $this->writeBlob(self::requirePositiveInt($request, 'blob_id'), self::requireString($request, 'bytes')),
+            'closeBlob' => $this->closeBlob(self::requirePositiveInt($request, 'blob_id')),
+            'prepare' => $this->prepare(self::requireString($request, 'sql')),
+            'closeStatement' => $this->closeStatement(self::requirePositiveInt($request, 'statement_id')),
+            'fetch' => $this->fetch(self::requirePositiveInt($request, 'result_id')),
+            'closeResult' => $this->closeResult(self::requirePositiveInt($request, 'result_id')),
+            'execute' => $this->execute($request),
+            'executeStatement' => $this->execute($request, self::requirePositiveInt($request, 'statement_id')),
+            'executeScript' => $this->executeScript(
+                self::requireString($request, 'sql'),
+                self::requireTransactionMode($request),
+            ),
+            default => throw new ProtocolError("Unknown operation '{$operation}'"),
         };
     }
 
@@ -129,6 +177,138 @@ final class WorkerProcess
     public function getLastExtendedErrorCode(): int
     {
         return $this->database->lastExtendedErrorCode();
+    }
+
+    private static function isPragmaMap(mixed $value): bool
+    {
+        return \is_array($value) && \array_all(
+            $value,
+            static fn (mixed $item, int|string $key): bool => \is_string($key)
+                && (\is_bool($item) || \is_int($item) || \is_float($item) || \is_string($item)),
+        );
+    }
+
+    private static function isFunctionMap(mixed $value): bool
+    {
+        return \is_array($value) && \array_all(
+            $value,
+            static fn (mixed $item, int|string $key): bool => \is_string($key)
+                && \is_array($item)
+                && \is_string($item['callback'] ?? null)
+                && \is_int($item['arg_count'] ?? null)
+                && \is_bool($item['deterministic'] ?? null),
+        );
+    }
+
+    private static function isAggregateMap(mixed $value): bool
+    {
+        return \is_array($value) && \array_all(
+            $value,
+            static fn (mixed $item, int|string $key): bool => \is_string($key)
+                && \is_array($item)
+                && \is_string($item['step'] ?? null)
+                && \is_string($item['final'] ?? null)
+                && \is_int($item['arg_count'] ?? null),
+        );
+    }
+
+    private static function isCollationMap(mixed $value): bool
+    {
+        return \is_array($value) && \array_all(
+            $value,
+            static fn (mixed $item, int|string $key): bool => \is_string($key) && \is_string($item),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     */
+    private static function requireString(array $request, string $key): string
+    {
+        if (!\is_string($request[$key] ?? null)) {
+            throw new ProtocolError("Protocol field '{$key}' must be a string");
+        }
+
+        return (string) $request[$key];
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     */
+    private static function requireInt(array $request, string $key): int
+    {
+        if (!\is_int($request[$key] ?? null)) {
+            throw new ProtocolError("Protocol field '{$key}' must be an integer");
+        }
+
+        return (int) $request[$key];
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     */
+    private static function requirePositiveInt(array $request, string $key): int
+    {
+        $value = self::requireInt($request, $key);
+        if ($value < 1) {
+            throw new ProtocolError("Protocol field '{$key}' must be a positive integer");
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     */
+    private static function optionalBool(array $request, string $key, bool $default): bool
+    {
+        if (!\array_key_exists($key, $request)) {
+            return $default;
+        }
+        if (!\is_bool($request[$key])) {
+            throw new ProtocolError("Protocol field '{$key}' must be a boolean");
+        }
+
+        return $request[$key];
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     *
+     * @return array<array-key, ParameterValue>
+     */
+    private static function requireParameters(array $request): array
+    {
+        $parameters = $request['params'] ?? null;
+        if (!\is_array($parameters) || !\array_all($parameters, self::isParameterValue(...))) {
+            throw new ProtocolError("Protocol field 'params' contains an invalid parameter");
+        }
+
+        /** @var array<array-key, ParameterValue> $parameters */
+        return $parameters;
+    }
+
+    private static function isParameterValue(mixed $value): bool
+    {
+        return $value === null
+            || \is_bool($value)
+            || \is_int($value)
+            || \is_float($value)
+            || \is_string($value)
+            || $value instanceof SqliteBlob;
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     */
+    private static function requireTransactionMode(array $request): string
+    {
+        $mode = self::requireString($request, 'transaction_mode');
+        if (!\in_array($mode, ['DEFERRED', 'IMMEDIATE', 'EXCLUSIVE'], true)) {
+            throw new ProtocolError("Invalid transaction mode '{$mode}'");
+        }
+
+        return $mode;
     }
 
     public function shutdown(): void
@@ -195,14 +375,16 @@ final class WorkerProcess
      */
     private function openBlob(array $request): array
     {
-        $flags = $request['mode'] === SqliteBlobMode::ReadWrite->name
-            ? SQLITE3_OPEN_READWRITE
-            : SQLITE3_OPEN_READONLY;
+        $mode = self::requireString($request, 'mode');
+        if ($mode !== SqliteBlobMode::ReadOnly->name && $mode !== SqliteBlobMode::ReadWrite->name) {
+            throw new ProtocolError("Invalid BLOB mode '{$mode}'");
+        }
+        $flags = $mode === SqliteBlobMode::ReadWrite->name ? SQLITE3_OPEN_READWRITE : SQLITE3_OPEN_READONLY;
         $blob = $this->database->openBlob(
-            $request['table'],
-            $request['column'],
-            $request['row_id'],
-            $request['database'],
+            self::requireString($request, 'table'),
+            self::requireString($request, 'column'),
+            self::requireInt($request, 'row_id'),
+            self::requireString($request, 'database'),
             $flags,
         );
         $blobId = $this->nextBlobId++;
@@ -292,7 +474,7 @@ final class WorkerProcess
     }
 
     /**
-     * @return array{rows: list<array<string, mixed>>, exhausted: bool}
+     * @return array{rows: list<Row>, exhausted: bool}
      */
     private function fetch(int $resultId): array
     {
@@ -343,6 +525,9 @@ final class WorkerProcess
                         throw new \RuntimeException('SQL scripts cannot contain transaction-control statements');
                     }
                     $result = $statement->execute();
+                    if ($result === false) {
+                        throw new \RuntimeException('Could not execute SQLite statement');
+                    }
                     $result->finalize();
                 } finally {
                     $statement->close();
@@ -368,11 +553,10 @@ final class WorkerProcess
      *
      * @return array<string, mixed>
      */
-    private function execute(array $request): array
+    private function execute(array $request, ?int $statementId = null): array
     {
         /** @var int $before */
         $before = $this->database->querySingle('SELECT total_changes()');
-        $statementId = $request['statement_id'] ?? null;
         if ($statementId !== null) {
             if (!isset($this->statements[$statementId])) {
                 throw new ProtocolError("Unknown statement ID '{$statementId}'");
@@ -385,12 +569,15 @@ final class WorkerProcess
                 $statement->reset();
             }
         } else {
-            $statement = $this->prepareSingleStatement($request['sql'], 'Only one SQL statement may be executed at a time');
+            $statement = $this->prepareSingleStatement(self::requireString($request, 'sql'), 'Only one SQL statement may be executed at a time');
         }
 
         $this->bindParameters($statement, $request);
 
         $nativeResult = $statement->execute();
+        if ($nativeResult === false) {
+            throw new \RuntimeException('Could not execute SQLite statement');
+        }
         $columns = $nativeResult->numColumns();
         /** @var int $after */
         $after = $this->database->querySingle('SELECT total_changes()');
@@ -445,13 +632,12 @@ final class WorkerProcess
      */
     private function bindParameters(\SQLite3Stmt $statement, array $request): void
     {
-        /** @var bool $bindParameters */
-        $bindParameters = $request['bind_parameters'] ?? true;
+        $bindParameters = self::optionalBool($request, 'bind_parameters', true);
         if ($bindParameters === false && $statement->paramCount() > 0) {
             throw new \RuntimeException('Parameters are not allowed in direct queries');
         }
 
-        foreach ($request['params'] as $key => $value) {
+        foreach (self::requireParameters($request) as $key => $value) {
             $position = \is_int($key) ? $key + 1 : $key;
             $type = match (true) {
                 $value === null => SQLITE3_NULL,
@@ -467,7 +653,7 @@ final class WorkerProcess
     }
 
     /**
-     * @return array{rows: list<array<string, mixed>>, exhausted: bool}
+     * @return array{rows: list<Row>, exhausted: bool}
      */
     private function fetchBatch(int $resultId): array
     {
@@ -483,6 +669,7 @@ final class WorkerProcess
             if ($row === false) {
                 return ['rows' => $rows, 'exhausted' => true];
             }
+            /** @var array<array-key, null|int|float|string> $row */
             $rows[] = $this->convertRow($result, $row);
         }
 
@@ -491,18 +678,20 @@ final class WorkerProcess
             return ['rows' => $rows, 'exhausted' => true];
         }
 
+        /** @var array<array-key, null|int|float|string> $row */
         $this->results[$resultId]['pending'] = $this->convertRow($result, $row);
 
         return ['rows' => $rows, 'exhausted' => false];
     }
 
     /**
-     * @param array<string, mixed> $row
+     * @param Row $row
      *
-     * @return array<string, mixed>
+     * @return Row
      */
     private function convertRow(\SQLite3Result $result, array $row): array
     {
+        /** @var array<array-key, int> $columnTypes */
         $columnTypes = [];
         for ($column = 0, $columns = $result->numColumns(); $column < $columns; ++$column) {
             $columnTypes[$result->columnName($column)] = $result->columnType($column);
@@ -518,7 +707,7 @@ final class WorkerProcess
     }
 
     /**
-     * @param array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: array<string, mixed>|null} $resource
+     * @param array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: Row|null} $resource
      */
     private function closeNativeResult(array $resource): void
     {
@@ -560,7 +749,7 @@ final class WorkerProcess
     }
 
     /**
-     * @param array{path: string, open_mode: string, journal_mode: string, ...} $open
+     * @param OpenConfig $open
      */
     private function applyJournalMode(array $open): void
     {
@@ -597,7 +786,7 @@ final class WorkerProcess
     }
 
     /**
-     * @param array{path: string, open_mode: string, synchronous_mode: string, ...} $open
+     * @param OpenConfig $open
      */
     private function applySynchronousMode(array $open): void
     {

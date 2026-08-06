@@ -16,32 +16,35 @@ namespace Fabpot\Amp\Sqlite\Internal;
 use Amp\Sync\Channel;
 
 return static function (Channel $channel): null {
-    /** @var array<string, mixed> $open */
-    $open = $channel->receive();
-
-    /** @psalm-suppress ArgumentTypeCoercion */
-    $worker = new WorkerProcess($open);
+    $worker = new WorkerProcess($channel->receive());
 
     $channel->send(['ready' => true]);
 
-    while (($request = $channel->receive()) !== null) {
+    while (($message = $channel->receive()) !== null) {
+        if (!\is_array($message) || !\is_int($message['id'] ?? null) || $message['id'] < 1) {
+            break;
+        }
+
+        $id = (int) $message['id'];
+        /** @var array<string, mixed> $request */
+        $request = $message;
+
         try {
-            $value = $worker->handle($request);
-            $channel->send(['id' => $request['id'], 'value' => $value]);
+            $channel->send(['id' => $id, 'value' => $worker->handle($request)]);
 
             if ($worker->isClosed()) {
                 return null;
             }
         } catch (ProtocolError $error) {
             $channel->send([
-                'id' => $request['id'],
+                'id' => $id,
                 'protocol_error' => ['message' => $error->getMessage()],
             ]);
 
             break;
         } catch (\SQLite3Exception $exception) {
             $channel->send([
-                'id' => $request['id'],
+                'id' => $id,
                 'query_error' => [
                     'message' => $exception->getMessage(),
                     'code' => $exception->getCode() & 0xFF,
@@ -50,7 +53,7 @@ return static function (Channel $channel): null {
             ]);
         } catch (\Throwable $exception) {
             $channel->send([
-                'id' => $request['id'],
+                'id' => $id,
                 'query_error' => [
                     'message' => $exception->getMessage(),
                     'code' => 0,

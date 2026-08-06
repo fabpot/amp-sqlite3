@@ -17,6 +17,7 @@ use Fabpot\Amp\Sqlite\Internal\ProtocolError;
 use Fabpot\Amp\Sqlite\Internal\WorkerProcess;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConfig;
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
@@ -27,6 +28,7 @@ use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
+use function Amp\delay;
 
 final class SqliteQueryTest extends TestCase
 {
@@ -185,6 +187,20 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
     }
 
+    public function testWorkerRejectsZeroLengthBlobReads(): void
+    {
+        $worker = $this->createWorker(batchSize: 1);
+
+        try {
+            $this->expectException(ProtocolError::class);
+            $this->expectExceptionMessage("Protocol field 'length' must be a positive integer");
+
+            $worker->handle(['operation' => 'readBlob', 'blob_id' => 1, 'length' => 0]);
+        } finally {
+            $worker->shutdown();
+        }
+    }
+
     public function testInitialFetchErrorDoesNotLeaveAStaleResult(): void
     {
         $worker = $this->createWorker(batchSize: 3);
@@ -223,6 +239,37 @@ final class SqliteQueryTest extends TestCase
         $result->close();
 
         self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
+    }
+
+    public function testOrderlyConnectionCloseInvalidatesBufferedResult(): void
+    {
+        $result = $this->connection->query('SELECT 1 AS value');
+
+        $this->connection->close();
+
+        self::assertTrue($result->isClosed());
+    }
+
+    public function testConnectionCloseInvalidatesResultAndReleasesWaitingOperation(): void
+    {
+        $result = $this->connection->query('SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3');
+        $closed = 0;
+        $result->onClose(static function () use (&$closed): void {
+            ++$closed;
+        });
+        $future = async(fn () => $this->connection->query('SELECT 4'));
+        delay(0);
+
+        self::assertFalse($future->isComplete());
+        $this->connection->close();
+        delay(0);
+
+        self::assertTrue($future->isComplete());
+        self::assertTrue($result->isClosed());
+        self::assertSame(1, $closed);
+
+        $this->expectException(SqliteConnectionException::class);
+        $future->await();
     }
 
     public function testFetchRowReturnsNullAfterExhaustion(): void

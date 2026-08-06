@@ -222,7 +222,41 @@ final class SqliteConnectionTest extends TestCase
         }
     }
 
-    public function testProtocolErrorClosesConnection(): void
+    public function testConnectionCloseInterruptsActiveChildOperation(): void
+    {
+        $config = (new SqliteConfig(':memory:'))->withFunction('pause', 'usleep', 1);
+        $connection = (new SqliteConnector())->connect($config);
+        $future = async(fn () => $connection->query('SELECT pause(500000)'));
+        delay(0.05);
+
+        self::assertFalse($future->isComplete());
+        $connection->close();
+        delay(0);
+
+        self::assertTrue($future->isComplete());
+        self::assertTrue($connection->isClosed());
+
+        $this->expectException(SqliteConnectionException::class);
+        $future->await();
+    }
+
+    public function testMalformedRequestClosesConnection(): void
+    {
+        $factory = new ProtocolErrorProcessContextFactory();
+        $connection = (new SqliteConnector($factory))->connect(new SqliteConfig(':memory:'));
+        $factory->context->send(['id' => 1, 'operation' => 'prepare', 'sql' => null]);
+
+        try {
+            $connection->query('SELECT 1');
+            self::fail('Expected the malformed request to fail the connection');
+        } catch (SqliteConnectionException $exception) {
+            self::assertSame("Protocol field 'sql' must be a string", $exception->getMessage());
+        }
+
+        self::assertTrue($connection->isClosed());
+    }
+
+    public function testInvalidOperationPayloadClosesConnection(): void
     {
         $factory = new ProtocolErrorProcessContextFactory();
         $connection = (new SqliteConnector($factory))->connect(new SqliteConfig(':memory:'));
@@ -230,7 +264,34 @@ final class SqliteConnectionTest extends TestCase
         $connection->onClose(static function () use (&$closed): void {
             ++$closed;
         });
-        $factory->context->send(['id' => 1, 'operation' => 'unknown']);
+        $factory->context->send(['id' => 1, 'operation' => 'prepare', 'sql' => 'SELECT 1']);
+
+        try {
+            $connection->query('SELECT 1');
+            self::fail('Expected the invalid payload to fail the connection');
+        } catch (SqliteConnectionException $exception) {
+            self::assertSame('Received an invalid response from the SQLite child process', $exception->getMessage());
+        }
+        delay(0);
+
+        self::assertTrue($connection->isClosed());
+        self::assertSame(1, $closed);
+    }
+
+    public function testProtocolErrorClosesConnection(): void
+    {
+        $factory = new ProtocolErrorProcessContextFactory();
+        $connection = (new SqliteConnector($factory))->connect(new SqliteConfig(':memory:'));
+        $closed = 0;
+        $statementClosed = 0;
+        $connection->onClose(static function () use (&$closed): void {
+            ++$closed;
+        });
+        $statement = $connection->prepare('SELECT 1');
+        $statement->onClose(static function () use (&$statementClosed): void {
+            ++$statementClosed;
+        });
+        $factory->context->send(['id' => 2, 'operation' => 'unknown']);
 
         try {
             $connection->query('SELECT 1');
@@ -241,7 +302,9 @@ final class SqliteConnectionTest extends TestCase
         delay(0);
 
         self::assertTrue($connection->isClosed());
+        self::assertTrue($statement->isClosed());
         self::assertSame(1, $closed);
+        self::assertSame(1, $statementClosed);
     }
 
     public function testExplicitRollbackJournalPreservesSynchronousDefault(): void

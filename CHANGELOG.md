@@ -2,6 +2,8 @@
 
 ## 1.0
 
+- Prevent connection shutdown and child-process failures from deadlocking queued operations
+- Validate SQLite child-process requests and responses at the IPC boundary
 - Preserve SQLite's synchronous default with explicit rollback journal modes
 - Retry explicit WAL activation during concurrent database initialization
 - Prevent concurrent statement closure from invalidating the connection
