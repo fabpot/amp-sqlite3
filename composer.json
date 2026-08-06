@@ -19,11 +19,18 @@
     "require": {
         "php": ">=8.4",
         "ext-sqlite3": "*",
-        "amphp/amp": "^3",
+        "amphp/amp": "^3.1.1",
         "amphp/byte-stream": "^2",
         "amphp/parallel": "^2",
-        "amphp/sql": "^2",
-        "amphp/sql-common": "^2"
+        "amphp/sql": "^2.0.1",
+        "amphp/sql-common": "^2.0.4",
+        "amphp/sync": "^2",
+        "revolt/event-loop": "^1.0.8"
+    },
+    "conflict": {
+        "amphp/dns": "<2.1.2",
+        "amphp/process": "<2.0.3",
+        "amphp/socket": "<2.3.1"
     },
     "require-dev": {
         "amphp/php-cs-fixer-config": "^2",
