@@ -122,8 +122,8 @@ $result = $connection->execute(
     [':name' => 'Fabien'],
 );
 
-$userId = $result->getLastInsertId();
-assert($userId !== null);
+$userId = $result->getLastInsertId()
+    ?? throw new \RuntimeException('SQLite did not report the inserted row ID.');
 ```
 
 The driver accepts SQLite's native anonymous (`?`), numbered (`?NNN`), and named (`:name`, `@name`, and `$name`) parameters, including mixed forms. Integer array keys are zero-based; string keys are passed to `SQLite3Stmt::bindValue()` unchanged. Parameters that PHP cannot bind by name can be bound by position. Placeholders that are not bound retain SQLite's native `NULL` value.
@@ -216,8 +216,8 @@ $result = $connection->query(
     'INSERT INTO files (contents) VALUES (zeroblob(1048576))',
 );
 
-$rowId = $result->getLastInsertId();
-assert($rowId !== null);
+$rowId = $result->getLastInsertId()
+    ?? throw new \RuntimeException('SQLite did not report the inserted row ID.');
 
 $blob = $connection->openBlob(
     'files',
