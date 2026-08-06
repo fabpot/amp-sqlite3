@@ -14,7 +14,14 @@ declare(strict_types=1);
 namespace Fabpot\Amp\Sqlite;
 
 use Amp\Sql\SqlConfig;
+use Fabpot\Amp\Sqlite\Internal\Path;
 
+/**
+ * SQLite connection configuration.
+ *
+ * The inherited getDatabase() and withDatabase() methods are aliases for the database path and are revalidated before
+ * connecting. The inherited host, port, user, and password options are not supported by SQLite.
+ */
 final class SqliteConfig extends SqlConfig
 {
     private const RESERVED_PRAGMAS = [
@@ -49,9 +56,25 @@ final class SqliteConfig extends SqlConfig
 
     public function __construct(string $path)
     {
-        self::validatePath($path);
+        Path::validate($path);
 
         parent::__construct('', 0, database: $path);
+    }
+
+    public function getPath(): string
+    {
+        $path = $this->getDatabase();
+        Path::validate($path);
+
+        /** @var string $path */
+        return $path;
+    }
+
+    public function withPath(string $path): self
+    {
+        Path::validate($path);
+
+        return $this->withDatabase($path);
     }
 
     public function getOpenMode(): SqliteOpenMode
@@ -273,17 +296,6 @@ final class SqliteConfig extends SqlConfig
         return $this->collations;
     }
 
-    public static function validatePath(?string $path): void
-    {
-        if ($path === null || $path === '') {
-            throw new \InvalidArgumentException('SQLite database path must not be empty');
-        }
-
-        if (\strncasecmp($path, 'file:', 5) === 0) {
-            throw new \InvalidArgumentException('SQLite URI filenames are not supported');
-        }
-    }
-
     private static function validateCallableName(string $name): void
     {
         if (!\preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name)) {
@@ -321,11 +333,11 @@ final class SqliteConfig extends SqlConfig
     private function validateModeCombination(): void
     {
         if ($this->openMode === SqliteOpenMode::ReadOnly && $this->journalMode !== SqliteJournalMode::Automatic) {
-            throw new \RuntimeException('An explicit journal mode cannot be used with a read-only database');
+            throw new \InvalidArgumentException('An explicit journal mode cannot be used with a read-only database');
         }
 
         if ($this->openMode === SqliteOpenMode::ReadOnly && $this->synchronousMode !== SqliteSynchronousMode::Automatic) {
-            throw new \RuntimeException('An explicit synchronous mode cannot be used with a read-only database');
+            throw new \InvalidArgumentException('An explicit synchronous mode cannot be used with a read-only database');
         }
     }
 }

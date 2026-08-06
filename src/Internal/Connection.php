@@ -336,9 +336,9 @@ final class Connection implements SqliteConnection
 
     private function copyDatabase(string $operation, string $path, string $database): void
     {
-        SqliteConfig::validatePath($path);
+        Path::validate($path);
         if ($path === ':memory:') {
-            throw new \RuntimeException('Backup and restore require a file path');
+            throw new \InvalidArgumentException('Backup and restore require a file path');
         }
 
         $this->assertOpen();

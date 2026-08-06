@@ -46,9 +46,26 @@ final class SqliteConnectionPoolTest extends TestCase
 
     public function testRejectsMemoryDatabases(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         new SqliteConnectionPool(new SqliteConfig(':memory:'));
+    }
+
+    public function testRejectsInvalidPoolLimits(): void
+    {
+        try {
+            new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 0);
+            self::fail('Expected the invalid connection limit to fail');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('Pool must contain at least one connection', $exception->getMessage());
+        }
+
+        try {
+            new SqliteConnectionPool(new SqliteConfig($this->path), idleTimeout: 0);
+            self::fail('Expected the invalid idle timeout to fail');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('The idle timeout must be 1 or greater', $exception->getMessage());
+        }
     }
 
     public function testClosedPoolRejectsOperationsWithConnectionException(): void

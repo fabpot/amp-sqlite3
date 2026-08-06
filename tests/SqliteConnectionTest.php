@@ -110,7 +110,7 @@ final class SqliteConnectionTest extends TestCase
 
     public function testRejectsInheritedServerConfiguration(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConnector())->connect((new SqliteConfig(':memory:'))->withHost('localhost'));
     }
@@ -120,6 +120,21 @@ final class SqliteConnectionTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConnector())->connect((new SqliteConfig(':memory:'))->withDatabase('file:database.sqlite'));
+    }
+
+    public function testWrapsContextFactoryFailuresAsConnectionExceptions(): void
+    {
+        $factory = new class implements \Amp\Parallel\Context\ContextFactory {
+            public function start(string|array $script, ?\Amp\Cancellation $cancellation = null): \Amp\Parallel\Context\Context
+            {
+                throw new \RuntimeException('Factory failed');
+            }
+        };
+
+        $this->expectException(SqliteConnectionException::class);
+        $this->expectExceptionMessage('Could not start the SQLite child process: Factory failed');
+
+        (new SqliteConnector($factory))->connect(new SqliteConfig(':memory:'));
     }
 
     public function testRejectsMissingDatabaseInReadWriteMode(): void

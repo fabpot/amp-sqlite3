@@ -44,11 +44,11 @@ final class SqliteConnector implements SqlConnector
         if (!$config instanceof SqliteConfig) {
             throw new \TypeError('SqliteConnector expects an instance of SqliteConfig');
         }
-        SqliteConfig::validatePath($config->getDatabase());
+        $path = $config->getPath();
         if ($config->getHost() !== '' || $config->getPort() !== 0 || $config->getUser() !== null || $config->getPassword() !== null) {
-            throw new \RuntimeException('SQLite configurations cannot contain server connection settings');
+            throw new \InvalidArgumentException('SQLite configurations cannot contain server connection settings');
         }
-        $path = Path::resolve($config->getDatabase());
+        $path = Path::resolve($path);
         $context = null;
 
         try {
@@ -79,10 +79,6 @@ final class SqliteConnector implements SqlConnector
             if (!\is_array($ready) || $ready !== ['ready' => true]) {
                 throw new SqliteConnectionException('The SQLite child process sent an invalid startup response');
             }
-        } catch (\RuntimeException $exception) {
-            $context?->close();
-
-            throw $exception;
         } catch (\Throwable $exception) {
             if ($context !== null && $exception instanceof ContextException) {
                 $exception = self::findChildFailure($context, $exception);

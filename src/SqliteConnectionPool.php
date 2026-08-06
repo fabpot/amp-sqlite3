@@ -36,8 +36,6 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
     private bool $closing = false;
 
     /**
-     * @param positive-int $maxConnections
-     * @param positive-int $idleTimeout
      * @param SqlConnector<SqliteConfig, SqliteConnection>|null $connector
      */
     public function __construct(
@@ -47,8 +45,14 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
         ?SqlConnector $connector = null,
         ?SqliteTransactionMode $transactionIsolation = null,
     ) {
-        if ($config->getDatabase() === ':memory:') {
-            throw new \RuntimeException('Connection pools cannot use :memory: databases, as every pooled connection would open a separate database');
+        if ($config->getPath() === ':memory:') {
+            throw new \InvalidArgumentException('Connection pools cannot use :memory: databases, as every pooled connection would open a separate database');
+        }
+        if ($maxConnections < 1) {
+            throw new \InvalidArgumentException('Pool must contain at least one connection');
+        }
+        if ($idleTimeout < 1) {
+            throw new \InvalidArgumentException('The idle timeout must be 1 or greater');
         }
 
         parent::__construct(

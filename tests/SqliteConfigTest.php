@@ -37,6 +37,33 @@ final class SqliteConfigTest extends TestCase
         yield 'URI with uppercase scheme' => ['FILE:database.sqlite'];
     }
 
+    public function testExposesPathSpecificAccessors(): void
+    {
+        $config = new SqliteConfig('database.sqlite');
+        $changed = $config->withPath('other.sqlite');
+
+        self::assertSame('database.sqlite', $config->getPath());
+        self::assertSame('other.sqlite', $changed->getPath());
+        self::assertSame('other.sqlite', $changed->getDatabase());
+    }
+
+    #[DataProvider('provideInvalidPaths')]
+    public function testPathMutationRevalidatesPath(string $path): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        (new SqliteConfig(':memory:'))->withPath($path);
+    }
+
+    public function testInheritedDatabaseMutationIsRevalidatedByPathAccessor(): void
+    {
+        $config = (new SqliteConfig(':memory:'))->withDatabase(null);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $config->getPath();
+    }
+
     #[DataProvider('provideInvalidBusyTimeouts')]
     public function testRejectsNegativeBusyTimeout(int $busyTimeout): void
     {
@@ -114,7 +141,7 @@ final class SqliteConfigTest extends TestCase
 
     public function testRejectsWalForReadOnlyConnections(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConfig('database.sqlite'))
             ->withOpenMode(SqliteOpenMode::ReadOnly)
@@ -123,7 +150,7 @@ final class SqliteConfigTest extends TestCase
 
     public function testRejectsReadOnlyConnectionsWhenWalWasSelectedFirst(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConfig('database.sqlite'))
             ->withJournalMode(SqliteJournalMode::Wal)
@@ -132,7 +159,7 @@ final class SqliteConfigTest extends TestCase
 
     public function testRejectsExplicitSynchronousModeForReadOnlyConnections(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         (new SqliteConfig('database.sqlite'))
             ->withOpenMode(SqliteOpenMode::ReadOnly)

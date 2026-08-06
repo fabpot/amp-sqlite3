@@ -18,6 +18,17 @@ use Fabpot\Amp\Sqlite\SqliteConnectionException;
 /** @internal */
 final class Path
 {
+    public static function validate(?string $path): void
+    {
+        if ($path === null || $path === '') {
+            throw new \InvalidArgumentException('SQLite database path must not be empty');
+        }
+
+        if (\strncasecmp($path, 'file:', 5) === 0) {
+            throw new \InvalidArgumentException('SQLite URI filenames are not supported');
+        }
+    }
+
     public static function resolve(?string $path): string
     {
         $path = (string) $path;
