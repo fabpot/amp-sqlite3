@@ -20,19 +20,19 @@ class SqliteQueryError extends SqlQueryError implements SqliteExceptionInterface
     public function __construct(
         string $message,
         string $query = '',
-        private readonly int $resultCode = 0,
-        private readonly int $extendedResultCode = 0,
+        private readonly ?int $resultCode = null,
+        private readonly ?int $extendedResultCode = null,
         ?\Throwable $previous = null,
     ) {
         parent::__construct($message, $query, $previous);
     }
 
-    public function getResultCode(): int
+    public function getResultCode(): ?int
     {
         return $this->resultCode;
     }
 
-    public function getExtendedResultCode(): int
+    public function getExtendedResultCode(): ?int
     {
         return $this->extendedResultCode;
     }

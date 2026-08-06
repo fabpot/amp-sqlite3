@@ -15,6 +15,7 @@ namespace Fabpot\Amp\Sqlite\Test;
 
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
@@ -103,7 +104,7 @@ final class SqliteBackupTest extends TestCase
 
     public function testRestoreFailsForMissingSource(): void
     {
-        $this->expectException(SqliteQueryError::class);
+        $this->expectException(SqliteException::class);
 
         $this->connection->restore($this->path);
     }

@@ -28,6 +28,14 @@ final class SqliteQueryErrorTest extends TestCase
         self::assertInstanceOf(SqliteExceptionInterface::class, new SqliteTransactionError());
     }
 
+    public function testDefaultsToUnknownSQLiteCodes(): void
+    {
+        $error = new SqliteQueryError('Query failed');
+
+        self::assertNull($error->getResultCode());
+        self::assertNull($error->getExtendedResultCode());
+    }
+
     public function testExposesSQLiteCodesWithoutIncludingParameters(): void
     {
         $error = new SqliteQueryError(

@@ -535,8 +535,8 @@ final class SqliteQueryTest extends TestCase
             $this->connection->execute('SELECT :value', ['missing' => 1]);
             self::fail('Expected the invalid parameter to fail');
         } catch (SqliteQueryError $error) {
-            self::assertSame(0, $error->getResultCode());
-            self::assertSame(0, $error->getExtendedResultCode());
+            self::assertNull($error->getResultCode());
+            self::assertNull($error->getExtendedResultCode());
         }
     }
 

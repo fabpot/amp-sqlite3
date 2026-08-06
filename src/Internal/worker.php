@@ -28,6 +28,13 @@ return static function (Channel $channel): null {
         $id = (int) $message['id'];
         /** @var array<string, mixed> $request */
         $request = $message;
+        $isQueryOperation = \is_string($request['operation'] ?? null) && \in_array($request['operation'], [
+            'prepare',
+            'fetch',
+            'execute',
+            'executeStatement',
+            'executeScript',
+        ], true);
 
         try {
             $channel->send(['id' => $id, 'value' => $worker->handle($request)]);
@@ -43,23 +50,43 @@ return static function (Channel $channel): null {
 
             break;
         } catch (\SQLite3Exception $exception) {
-            $channel->send([
-                'id' => $id,
-                'query_error' => [
-                    'message' => $exception->getMessage(),
-                    'code' => $exception->getCode() & 0xFF,
-                    'extended_code' => $worker->getLastExtendedErrorCode(),
-                ],
-            ]);
+            if ($isQueryOperation) {
+                $channel->send([
+                    'id' => $id,
+                    'query_error' => [
+                        'message' => $exception->getMessage(),
+                        'code' => $exception->getCode() & 0xFF,
+                        'extended_code' => $worker->getLastExtendedErrorCode(),
+                    ],
+                ]);
+            } else {
+                $channel->send([
+                    'id' => $id,
+                    'operation_error' => [
+                        'message' => $exception->getMessage(),
+                        'code' => $exception->getCode() & 0xFF,
+                    ],
+                ]);
+            }
         } catch (\Throwable $exception) {
-            $channel->send([
-                'id' => $id,
-                'query_error' => [
-                    'message' => $exception->getMessage(),
-                    'code' => 0,
-                    'extended_code' => 0,
-                ],
-            ]);
+            if ($isQueryOperation) {
+                $channel->send([
+                    'id' => $id,
+                    'query_error' => [
+                        'message' => $exception->getMessage(),
+                        'code' => null,
+                        'extended_code' => null,
+                    ],
+                ]);
+            } else {
+                $channel->send([
+                    'id' => $id,
+                    'operation_error' => [
+                        'message' => $exception->getMessage(),
+                        'code' => null,
+                    ],
+                ]);
+            }
         }
     }
 

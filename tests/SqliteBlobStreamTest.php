@@ -18,6 +18,7 @@ use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteException;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 use function Amp\ByteStream\buffer;
@@ -89,6 +90,13 @@ final class SqliteBlobStreamTest extends TestCase
         $transaction->rollback();
 
         self::assertSame(['contents' => '000000'], $this->connection->query('SELECT hex(contents) AS contents FROM files')->fetchRow());
+    }
+
+    public function testBlobOperationFailuresUseGeneralSqliteException(): void
+    {
+        $this->expectException(SqliteException::class);
+
+        $this->connection->openBlob('files', 'contents', 999);
     }
 
     public function testRejectsWritingPastBlobLength(): void

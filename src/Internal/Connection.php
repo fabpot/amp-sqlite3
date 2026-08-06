@@ -785,6 +785,12 @@ final class Connection implements SqliteConnection
             );
         }
 
+        if (\array_key_exists('operation_error', $response)) {
+            $error = $this->validateOperationError($response['operation_error']);
+
+            throw new SqliteException($error['message'], $error['code'] ?? 0);
+        }
+
         if (!\array_key_exists('value', $response)) {
             $this->invalidResponse();
         }
@@ -807,20 +813,40 @@ final class Connection implements SqliteConnection
     }
 
     /**
-     * @return array{message: string, code: int, extended_code: int}
+     * @return array{message: string, code: int|null, extended_code: int|null}
      */
     private function validateQueryError(mixed $error): array
     {
         if (!\is_array($error)
             || \count($error) !== 3
             || !\is_string($error['message'] ?? null)
-            || !\is_int($error['code'] ?? null)
-            || !\is_int($error['extended_code'] ?? null)
+            || !\array_key_exists('code', $error)
+            || ($error['code'] !== null && !\is_int($error['code']))
+            || !\array_key_exists('extended_code', $error)
+            || ($error['extended_code'] !== null && !\is_int($error['extended_code']))
         ) {
             $this->invalidResponse();
         }
 
-        /** @var array{message: string, code: int, extended_code: int} $error */
+        /** @var array{message: string, code: int|null, extended_code: int|null} $error */
+        return $error;
+    }
+
+    /**
+     * @return array{message: string, code: int|null}
+     */
+    private function validateOperationError(mixed $error): array
+    {
+        if (!\is_array($error)
+            || \count($error) !== 2
+            || !\is_string($error['message'] ?? null)
+            || !\array_key_exists('code', $error)
+            || ($error['code'] !== null && !\is_int($error['code']))
+        ) {
+            $this->invalidResponse();
+        }
+
+        /** @var array{message: string, code: int|null} $error */
         return $error;
     }
 
