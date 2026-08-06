@@ -25,7 +25,9 @@ $config = (new SqliteConfig(__DIR__ . '/database.sqlite'))
 $connection = (new SqliteConnector())->connect($config);
 ```
 
-Writable file databases use WAL and `NORMAL` synchronous mode by default. When an explicit rollback journal mode is selected, automatic synchronous mode preserves SQLite's default. Foreign keys are enabled and trusted schema is disabled. `:memory:` databases retain SQLite's memory journal behavior.
+Writable file databases use WAL and `NORMAL` synchronous mode by default. This is safe against application crashes, but a power loss can roll back the most recent committed transaction. Select `SqliteSynchronousMode::Full` when every commit must survive a power loss. WAL creates `-wal` and `-shm` files and requires filesystem locking and shared memory, so select a rollback journal such as `SqliteJournalMode::Delete` on network filesystems or filesystems without reliable WAL support. `Off` journal or synchronous modes trade durability for speed and can corrupt a database after a crash.
+
+When an explicit rollback journal mode is selected, automatic synchronous mode preserves SQLite's default. Foreign keys are enabled and trusted schema is disabled. `:memory:` databases retain SQLite's non-durable memory journal behavior.
 
 Always close connections when they are no longer needed:
 
@@ -62,7 +64,9 @@ $config = (new SqliteConfig(__DIR__ . '/database.sqlite'))
 
 Additional pragmas default to none and can be configured as needed, for example with `->withPragma('cache_size', -8_000)`. `SqliteConfig` is immutable; every `with*()` method returns a new instance. Invalid combinations (e.g. an explicit journal mode on a read-only database) are rejected. Pragmas with a dedicated option (`journal_mode`, `synchronous`, `foreign_keys`, `busy_timeout`, `trusted_schema`) cannot be set through `withPragma()`.
 
-Connection pools use the configured transaction mode by default. Pass `transactionIsolation` to the pool constructor or call `setTransactionIsolation()` to override it.
+Connection pools use the configured transaction mode by default. Pass `transactionIsolation` to the pool constructor or call `setTransactionIsolation()` to override it. `Deferred`, `Immediate`, and `Exclusive` are SQLite `BEGIN` locking modes, not portable SQL isolation levels. Consequently, SQLite connections only accept `SqliteTransactionMode`; passing another `Amp\Sql\SqlTransactionIsolation` implementation throws `InvalidArgumentException`.
+
+Use `getPath()` and `withPath()` to read or change the database path. The inherited `getDatabase()` and `withDatabase()` methods are supported aliases required by AMPHP's SQL configuration API, and their values are revalidated before connecting. The inherited host, port, user, and password options are not supported and cause `InvalidArgumentException` when connecting.
 
 Relative paths are resolved against the current working directory of the parent process. SQLite URI filenames (`file:...`) are not supported.
 
@@ -118,14 +122,15 @@ $result = $connection->execute(
     [':name' => 'Fabien'],
 );
 
-echo $result->getLastInsertId();
+$userId = $result->getLastInsertId();
+assert($userId !== null);
 ```
 
-The driver accepts SQLite's native anonymous (`?`), numbered (`?NNN`), and named (`:name`, `@name`, and `$name`) parameters, including mixed forms. Integer array keys are zero-based; string keys are passed to `SQLite3Stmt::bindValue()` unchanged. Parameters that PHP cannot bind by name can be bound by position.
+The driver accepts SQLite's native anonymous (`?`), numbered (`?NNN`), and named (`:name`, `@name`, and `$name`) parameters, including mixed forms. Integer array keys are zero-based; string keys are passed to `SQLite3Stmt::bindValue()` unchanged. Parameters that PHP cannot bind by name can be bound by position. Placeholders that are not bound retain SQLite's native `NULL` value.
 
 Parameter values must be `null`, `bool`, `int`, `float`, `string`, or `SqliteBlob`; anything else throws a `TypeError`. Booleans are bound as integers.
 
-The driver accepts one SQL statement per `query()` or `execute()` operation. Empty SQL and multiple statements are rejected.
+The driver accepts one SQL statement per `query()` or `execute()` operation. Empty SQL and multiple statements are rejected. DML statements containing a `RETURNING` clause are also rejected before execution because PHP's `SQLite3` extension can execute them twice while fetching their result rows.
 
 Use `executeScript()` for parameterless schema or migration scripts containing multiple statements:
 
@@ -156,16 +161,22 @@ Row values keep their SQLite types: `null`, `int`, `float`, `string`, or `Sqlite
 $insert = $connection->execute('INSERT INTO users (name) VALUES (?)', ['Alice']);
 
 $insert->getRowCount();     // changed rows, including trigger changes; 0 for DDL; null for row-producing SQL
-$insert->getLastInsertId(); // last inserted row ID
+$insert->getLastInsertId(); // inserted row ID when unambiguous; otherwise null
 $insert->getColumnCount();  // null for commands, column count for row-producing SQL
 $insert->getColumnNames();  // null for commands, list of column names for row-producing SQL
 ```
+
+`getLastInsertId()` is result-specific rather than a direct exposure of SQLite's connection-global `last_insert_rowid()`. It returns the final row ID for an unambiguous insert into an ordinary rowid table. It returns `null` for non-insert statements, ignored inserts, `WITHOUT ROWID` tables, views, virtual tables, the update branch of an UPSERT, and any other ambiguous case.
+
+SQLite converts numeric column names to integer PHP array keys; other column names remain strings.
 
 An active row-producing result owns its connection until it is exhausted or closed. Close a result explicitly when abandoning unread rows:
 
 ```php
 $result->close();
 ```
+
+After natural exhaustion, `fetchRow()` continues returning `null`. Calling it after an explicit `close()` throws `SqliteException`, for both direct and pooled results.
 
 ## Prepared statements
 
@@ -178,6 +189,8 @@ $statement->execute(['Fabien']);
 $statement->execute(['Alice']);
 $statement->close();
 ```
+
+Executing a statement again closes its previous unread result. A statement prepared through a transaction is scoped to that transaction and closes automatically when the transaction commits, rolls back, or loses its connection. Statements prepared directly on a connection or pool remain reusable until explicitly closed or their owner closes.
 
 ## BLOB values
 
@@ -203,10 +216,13 @@ $result = $connection->query(
     'INSERT INTO files (contents) VALUES (zeroblob(1048576))',
 );
 
+$rowId = $result->getLastInsertId();
+assert($rowId !== null);
+
 $blob = $connection->openBlob(
     'files',
     'contents',
-    $result->getLastInsertId(),
+    $rowId,
     mode: SqliteBlobMode::ReadWrite,
 );
 
@@ -234,7 +250,9 @@ foreach ($blob as $chunk) {
 $bytes = buffer($connection->openBlob('files', 'contents', $rowId));
 ```
 
-A BLOB's length is fixed when opened; writing past that length fails. An open BLOB owns its connection until it is closed, so always close it explicitly when abandoning a read or write. Transactions expose the same `openBlob()` method; BLOB writes made inside a transaction roll back with it.
+A BLOB's length is fixed when opened; writing past that length fails. `openBlob()` defaults to the `main` database and read-only mode; pass its `database` and `mode` arguments for attached databases or writes. Only one `read()` may be pending at a time, as required by AMPHP's stream contract. A concurrent read throws `PendingReadError`. If cancellation arrives after an IPC read was sent, the response is drained, the BLOB is closed to keep its position consistent, and `CancelledException` is thrown.
+
+An open BLOB owns its connection until it is closed, so always close it explicitly when abandoning a read or write. Transactions expose the same `openBlob()` method; BLOB writes made inside a transaction roll back with it.
 
 ## Custom functions, aggregates, and collations
 
@@ -262,11 +280,11 @@ $connection = (new SqliteConnector())->connect($config);
 $connection->query("SELECT slug(title) FROM posts ORDER BY title COLLATE natural");
 ```
 
-Callables are validated when registered and resolved again in the child process through the Composer autoloader. Mark functions `deterministic` when they always return the same output for the same input; SQLite can then use them in indexes and optimize repeated calls.
+Callables are validated when registered and resolved again in the child process through the Composer autoloader. Mark functions `deterministic` when they always return the same output for the same input so SQLite can optimize repeated calls. The default `trusted_schema=false` prevents application-defined functions from being used in schema expressions such as indexes, generated columns, or constraints. Explicitly enable `withTrustedSchema(true)` only when the database schema is trusted and such use is required.
 
 ## Backup and restore
 
-`backup()` copies the entire database to a file using SQLite's online backup API, replacing any existing contents. `restore()` does the reverse. Both work for `:memory:` databases, which makes them the way to persist and reload an in-memory database:
+`backup()` copies the entire database to a file using SQLite's online backup API, replacing any existing contents. `restore()` does the reverse. Both default to the `main` database; pass their optional `database` argument to copy an attached database instead. Both work for `:memory:` databases, which makes them the way to persist and reload an in-memory database:
 
 ```php
 $connection->backup(__DIR__ . '/snapshot.sqlite');
@@ -276,6 +294,8 @@ $connection->restore(__DIR__ . '/snapshot.sqlite');
 ```
 
 A backup waits for the connection to be free, so it cannot run while a transaction is open on the same connection. Backing up a file database that other connections are writing to is safe: the backup API retries and produces a consistent copy.
+
+On a pool, `backup()` and `restore()` run on one acquired connection. A transaction that was already active on another pooled connection retains its existing SQLite snapshot; later pool operations see the restored database. Perform restores while the application has exclusive ownership if every concurrent operation must switch snapshots together.
 
 ## WAL checkpoints
 
@@ -304,7 +324,7 @@ try {
 
 A transaction owns its connection until committed or rolled back. An abandoned transaction is rolled back automatically. Configure the top-level mode with `SqliteTransactionMode::Deferred`, `Immediate`, or `Exclusive`.
 
-Close any unread results and open BLOB streams before committing or rolling back: these own the transaction's connection while active, so `commit()` and `rollback()` wait for them.
+Close any unread results and open BLOB streams before committing or rolling back: these own the transaction's connection while active, so `commit()` and `rollback()` wait for them. Prepared statements do not block completion; they close automatically when their transaction finishes.
 
 Nested transactions use SQLite savepoints:
 
@@ -319,7 +339,23 @@ $nested->rollback();
 $transaction->commit();
 ```
 
-Register lifecycle callbacks with `onCommit()` and `onRollback()`. Callbacks on a nested transaction run once the outcome is final, i.e. when the top-level transaction commits or rolls back.
+Register lifecycle callbacks with `onCommit()` and `onRollback()`. Committing a nested transaction defers its commit or rollback callback until the top-level outcome is known. Rolling back a nested transaction is already final, so its rollback callbacks run immediately.
+
+## Upgrading from 0.2
+
+Version 1.0 freezes several contracts that were implicit or inconsistent in the preview releases:
+
+- `query()` and `execute()` accept exactly one statement. Use atomic `executeScript()` for multi-statement, parameterless scripts. DML `RETURNING` clauses are rejected before execution.
+- `getLastInsertId()` now returns `?int` and only reports an ID attributable to that result; check for `null` before using it.
+- Results and statements throw `SqliteException` after explicit closure. Direct and pooled results now behave identically.
+- Statements prepared through a transaction close when that transaction finishes. Do not retain them for later execution.
+- Closed pools and queued operations interrupted by pool closure throw `SqliteConnectionException`.
+- `SqliteQueryError` result-code getters now return `?int`. Non-SQL SQLite operations use `SqliteException` instead of `SqliteQueryError`.
+- SQLite transaction getters return `SqliteTransactionMode`; other AMPHP isolation implementations are rejected with `InvalidArgumentException`.
+- Prefer `SqliteConfig::getPath()` and `withPath()`. The former public `validatePath()` helper was implementation detail and has been removed. Invalid configuration combinations now consistently throw `InvalidArgumentException`.
+- SQLite result rows contain `null`, `int`, `float`, `string`, or `SqliteBlob`; numeric column names become integer PHP keys.
+
+Review the WAL durability and filesystem requirements, trusted-schema behavior, and callback secrecy caveat above before deploying the new defaults in an existing application.
 
 ## Errors
 
@@ -335,10 +371,11 @@ try {
 }
 ```
 
-- `SqliteQueryError`: SQL preparation and execution failures, with SQLite result codes.
-- `SqliteConnectionException`: startup, IPC, and unexpected child-process failures.
-- `SqliteTransactionError`: operations on finished transactions.
-- `SqliteException`: operations on closed statements or results.
-- All implement `SqliteExceptionInterface` and extend the corresponding `Amp\Sql` errors or exceptions.
+- `SqliteQueryError`: SQL preparation and execution failures. `getResultCode()` and `getExtendedResultCode()` return integers for native SQLite failures and `null` for driver or callback failures without native codes.
+- `SqliteConnectionException`: startup, IPC, closed-pool, and unexpected child-process failures.
+- `SqliteTransactionError`: operations on finished transactions or invalid transaction state.
+- `SqliteException`: non-SQL SQLite operations such as backup, restore, and BLOB I/O, as well as operations on closed statements or results.
+- Invalid public arguments and configuration combinations throw `TypeError` or `InvalidArgumentException`.
+- All SQLite domain errors implement `SqliteExceptionInterface` and extend the corresponding `Amp\Sql` errors or exceptions.
 
-Exception messages and traces never contain bound parameter values.
+The driver never includes bound parameter values in errors it creates. Custom SQL functions, aggregates, and collations execute application code, so an exception message created by a callback can expose the callback arguments.

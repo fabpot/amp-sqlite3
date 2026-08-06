@@ -2,6 +2,13 @@
 
 ## 1.0
 
+- Make last-insert IDs result-specific and nullable
+- Scope transaction-prepared statements to their transaction
+- Normalize direct and pooled closure behavior and errors
+- Distinguish SQL query failures from non-SQL SQLite operation failures
+- Enforce AMPHP's pending-read and cancellation contracts for BLOB streams
+- Add path-specific configuration accessors and SQLite-specific transaction mode types
+- Reject DML RETURNING clauses before PHP's SQLite3 result handling can execute them twice
 - Prevent connection shutdown and child-process failures from deadlocking queued operations
 - Validate SQLite child-process requests and responses at the IPC boundary
 - Preserve SQLite's synchronous default with explicit rollback journal modes
