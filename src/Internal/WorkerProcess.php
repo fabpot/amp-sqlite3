@@ -578,6 +578,7 @@ final class WorkerProcess
             } catch (\Throwable) {
                 $statement->reset();
             }
+            $this->refreshStatementMetadata($statement);
         } else {
             $statement = $this->prepareSingleStatement(self::requireString($request, 'sql'), 'Only one SQL statement may be executed at a time');
         }
@@ -731,6 +732,36 @@ final class WorkerProcess
 
     private function prepareSingleStatement(string $sql, string $error): \SQLite3Stmt
     {
+        $statement = $this->prepareWithMetadata($sql, $metadata);
+        if (!$statement) {
+            throw new \RuntimeException('SQL must contain an executable statement');
+        }
+        try {
+            $consumedSql = $statement->getSQL();
+        } catch (\Error $previous) {
+            throw new \RuntimeException('SQL must contain an executable statement', previous: $previous);
+        }
+        if (SqlStatementBoundary::hasSecondStatement(\substr($sql, \strlen($consumedSql)))) {
+            $statement->close();
+            throw new \RuntimeException($error);
+        }
+
+        $this->statementMetadata[$statement] = $metadata;
+        try {
+            $this->refreshStatementMetadata($statement);
+        } catch (\Throwable $exception) {
+            $statement->close();
+            throw $exception;
+        }
+
+        return $statement;
+    }
+
+    /**
+     * @param-out StatementMetadata $metadata
+     */
+    private function prepareWithMetadata(string $sql, ?array &$metadata): \SQLite3Stmt|false
+    {
         /** @var StatementMetadata $metadata */
         $metadata = ['insert' => null, 'ambiguous_insert' => false, 'update' => false, 'delete' => false];
         $this->database->setAuthorizer(static function (
@@ -761,51 +792,52 @@ final class WorkerProcess
         });
 
         try {
-            $statement = $this->database->prepare($sql);
+            return $this->database->prepare($sql);
         } finally {
             $this->database->setAuthorizer(null);
         }
-        if (!$statement) {
-            throw new \RuntimeException('SQL must contain an executable statement');
+    }
+
+    private function refreshStatementMetadata(\SQLite3Stmt $statement): void
+    {
+        if ($statement->readOnly() || self::isExplainStatement($statement->getSQL())) {
+            return;
         }
-        try {
-            $consumedSql = $statement->getSQL();
-        } catch (\Error $previous) {
-            throw new \RuntimeException('SQL must contain an executable statement', previous: $previous);
-        }
-        if (SqlStatementBoundary::hasSecondStatement(\substr($sql, \strlen($consumedSql)))) {
-            $statement->close();
-            throw new \RuntimeException($error);
-        }
-        if (($metadata['insert'] !== null || $metadata['update'] || $metadata['delete'])
-            && $this->hasResultRowOpcode($consumedSql)
-        ) {
-            $statement->close();
-            throw new \RuntimeException('DML statements with a RETURNING clause are not supported by the PHP SQLite3 extension');
+
+        [$metadata, $hasResultRows] = $this->analyzeStatement($statement->getSQL());
+        if (($metadata['insert'] !== null || $metadata['update'] || $metadata['delete']) && $hasResultRows) {
+            throw new \RuntimeException('Row-producing DML statements are not supported by the PHP SQLite3 extension');
         }
 
         $this->statementMetadata[$statement] = $metadata;
-
-        return $statement;
     }
 
-    private function hasResultRowOpcode(string $sql): bool
+    private static function isExplainStatement(string $sql): bool
     {
-        $statement = $this->database->prepare('EXPLAIN ' . $sql);
+        return (bool) \preg_match('/\A(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))*EXPLAIN\b/is', $sql);
+    }
+
+    /**
+     * @return array{StatementMetadata, bool}
+     */
+    private function analyzeStatement(string $sql): array
+    {
+        $statement = $this->prepareWithMetadata('EXPLAIN ' . $sql, $metadata);
         if (!$statement) {
-            return false;
+            return [$metadata, false];
         }
 
+        $hasResultRows = false;
         try {
             $result = $statement->execute();
             if ($result === false) {
-                return false;
+                return [$metadata, false];
             }
 
             try {
                 while (($row = $result->fetchArray(SQLITE3_ASSOC)) !== false) {
                     if (($row['opcode'] ?? null) === 'ResultRow') {
-                        return true;
+                        $hasResultRows = true;
                     }
                 }
             } finally {
@@ -815,7 +847,7 @@ final class WorkerProcess
             $statement->close();
         }
 
-        return false;
+        return [$metadata, $hasResultRows];
     }
 
     private function detectLastInsertId(\SQLite3Stmt $statement, int $before): ?int
@@ -876,8 +908,120 @@ final class WorkerProcess
             return false;
         }
 
-        return !\preg_match('/\bCREATE\s+VIRTUAL\s+TABLE\b/i', $sql)
-            && !\preg_match('/\bWITHOUT(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))+ROWID\b/is', $sql);
+        return self::isOrdinaryTableDefinition($sql);
+    }
+
+    private static function isOrdinaryTableDefinition(string $sql): bool
+    {
+        /** @var list<array{word: string, depth: int, after_definition: bool}> $words */
+        $words = [];
+        $length = \strlen($sql);
+        $depth = 0;
+        $afterDefinition = false;
+
+        for ($offset = 0; $offset < $length;) {
+            $character = $sql[$offset];
+            $next = $sql[$offset + 1] ?? '';
+
+            if ($character === '-' && $next === '-') {
+                $newline = \strcspn($sql, "\r\n", $offset + 2);
+                $offset += 2 + $newline;
+                continue;
+            }
+            if ($character === '/' && $next === '*') {
+                $end = \strpos($sql, '*/', $offset + 2);
+                $offset = $end === false ? $length : $end + 2;
+                continue;
+            }
+            if ($character === "'" || $character === '"' || $character === '`') {
+                $quote = $character;
+                ++$offset;
+                while ($offset < $length) {
+                    if ($sql[$offset] !== $quote) {
+                        ++$offset;
+                        continue;
+                    }
+                    if (($sql[$offset + 1] ?? '') === $quote) {
+                        $offset += 2;
+                        continue;
+                    }
+
+                    ++$offset;
+                    break;
+                }
+                continue;
+            }
+            if ($character === '[') {
+                $end = \strpos($sql, ']', $offset + 1);
+                $offset = $end === false ? $length : $end + 1;
+                continue;
+            }
+            if ($character === '(') {
+                ++$depth;
+                ++$offset;
+                continue;
+            }
+            if ($character === ')') {
+                if ($depth === 1) {
+                    $afterDefinition = true;
+                }
+                $depth = \max(0, $depth - 1);
+                ++$offset;
+                continue;
+            }
+            if (!(
+                ('A' <= $character && $character <= 'Z')
+                || ('a' <= $character && $character <= 'z')
+                || $character === '_'
+            )) {
+                ++$offset;
+                continue;
+            }
+
+            $start = $offset++;
+            while ($offset < $length) {
+                $character = $sql[$offset];
+                if (!(
+                    ('A' <= $character && $character <= 'Z')
+                    || ('a' <= $character && $character <= 'z')
+                    || ('0' <= $character && $character <= '9')
+                    || $character === '_'
+                )) {
+                    break;
+                }
+                ++$offset;
+            }
+            $words[] = [
+                'word' => \strtoupper(\substr($sql, $start, $offset - $start)),
+                'depth' => $depth,
+                'after_definition' => $afterDefinition,
+            ];
+        }
+
+        if (($words[0]['word'] ?? null) === 'CREATE'
+            && ($words[1]['word'] ?? null) === 'VIRTUAL'
+            && ($words[2]['word'] ?? null) === 'TABLE'
+            && ($words[0]['depth'] ?? null) === 0
+            && ($words[1]['depth'] ?? null) === 0
+            && ($words[2]['depth'] ?? null) === 0
+        ) {
+            return false;
+        }
+
+        foreach ($words as $index => $word) {
+            $next = $words[$index + 1] ?? null;
+            if ($word['after_definition']
+                && $word['depth'] === 0
+                && $word['word'] === 'WITHOUT'
+                && $next !== null
+                && $next['depth'] === 0
+                && $next['word'] === 'ROWID'
+            ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function applyPragma(string $name, bool|int|float|string $value): null|bool|int|float|string

@@ -449,7 +449,7 @@ final class SqliteQueryTest extends TestCase
             self::fail('Expected the unsafe RETURNING statement to be rejected');
         } catch (SqliteQueryError $error) {
             self::assertSame(
-                'DML statements with a RETURNING clause are not supported by the PHP SQLite3 extension',
+                'Row-producing DML statements are not supported by the PHP SQLite3 extension',
                 $error->getMessage(),
             );
         }
@@ -463,6 +463,70 @@ final class SqliteQueryTest extends TestCase
 
         self::assertSame(5, $statement->execute([5, 'value'])->getLastInsertId());
         self::assertNull($statement->execute([6, 'value'])->getLastInsertId());
+    }
+
+    public function testPreparedInsertRefreshesMetadataAfterTemporaryTableShadowing(): void
+    {
+        $this->connection->query('CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT)');
+        $this->connection->query("INSERT INTO entries (value) VALUES ('main')");
+        $statement = $this->connection->prepare('INSERT INTO entries (value) VALUES (?)');
+        $this->connection->query('CREATE TEMP TABLE entries (value TEXT PRIMARY KEY) WITHOUT ROWID');
+
+        $result = $statement->execute(['temporary']);
+
+        self::assertNull($result->getLastInsertId());
+        self::assertSame([['value' => 'temporary']], \iterator_to_array($this->connection->query('SELECT value FROM temp.entries')));
+        self::assertSame([['value' => 'main']], \iterator_to_array($this->connection->query('SELECT value FROM main.entries')));
+    }
+
+    public function testPreparedDmlBecomingRowProducingIsRejectedBeforeExecution(): void
+    {
+        $this->connection->query('CREATE TABLE entries (value TEXT)');
+        $statement = $this->connection->prepare('INSERT INTO entries VALUES (?)');
+        $this->connection->query('PRAGMA count_changes = ON')->close();
+
+        try {
+            $statement->execute(['duplicated']);
+            self::fail('Expected row-producing DML to be rejected');
+        } catch (SqliteQueryError $error) {
+            self::assertSame(
+                'Row-producing DML statements are not supported by the PHP SQLite3 extension',
+                $error->getMessage(),
+            );
+        }
+
+        self::assertSame(0, $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
+    }
+
+    public function testExplainOfDmlRemainsReadOnly(): void
+    {
+        $this->connection->query('CREATE TABLE entries (value TEXT)');
+
+        self::assertNotNull($this->connection->query("EXPLAIN UPDATE entries SET value = 'updated'")->fetchRow());
+        self::assertNotNull($this->connection->query("EXPLAIN QUERY PLAN DELETE FROM entries WHERE value = 'deleted'")->fetchRow());
+        self::assertSame(0, $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
+    }
+
+    public function testTableDefinitionTextDoesNotHideUnambiguousInsertId(): void
+    {
+        $this->connection->executeScript(<<<'SQL'
+            CREATE TABLE defaults_without_rowid (
+                id INTEGER PRIMARY KEY,
+                note TEXT DEFAULT 'WITHOUT ROWID'
+            );
+            CREATE TABLE quoted_without_rowid (
+                id INTEGER PRIMARY KEY,
+                "WITHOUT ROWID" TEXT
+            );
+            CREATE TABLE defaults_virtual (
+                id INTEGER PRIMARY KEY,
+                note TEXT DEFAULT 'CREATE VIRTUAL TABLE'
+            );
+            SQL);
+
+        self::assertSame(1, $this->connection->query('INSERT INTO defaults_without_rowid DEFAULT VALUES')->getLastInsertId());
+        self::assertSame(1, $this->connection->query('INSERT INTO quoted_without_rowid DEFAULT VALUES')->getLastInsertId());
+        self::assertSame(1, $this->connection->query('INSERT INTO defaults_virtual DEFAULT VALUES')->getLastInsertId());
     }
 
     public function testLastInsertIdSupportsTemporaryAndAttachedTables(): void
