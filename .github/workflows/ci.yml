@@ -45,4 +45,4 @@ jobs:
           coverage: none
       - run: composer install --no-interaction --prefer-dist
       - run: composer cs
-      - run: composer psalm
+      - run: composer phpstan

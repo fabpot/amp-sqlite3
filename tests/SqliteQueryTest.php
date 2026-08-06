@@ -54,6 +54,7 @@ final class SqliteQueryTest extends TestCase
         $this->connection->query($sql);
     }
 
+    /** @return iterable<string, array{string, string}> */
     public static function provideInvalidSql(): iterable
     {
         yield 'empty' => ['', 'SQL must contain an executable statement'];
@@ -323,6 +324,7 @@ final class SqliteQueryTest extends TestCase
         );
     }
 
+    /** @param array<array-key, bool|SqliteBlob|float|int|string|null> $params */
     #[DataProvider('provideInvalidParameters')]
     public function testRejectsInvalidParameters(string $sql, array $params): void
     {
@@ -331,6 +333,7 @@ final class SqliteQueryTest extends TestCase
         $this->connection->execute($sql, $params);
     }
 
+    /** @return iterable<string, array{string, array<array-key, int|string>}> */
     public static function provideInvalidParameters(): iterable
     {
         yield 'extra positional' => ['SELECT 1', [1]];
@@ -349,9 +352,9 @@ final class SqliteQueryTest extends TestCase
     public function testRejectsUnsupportedParameterValueWithoutLeakingIt(): void
     {
         try {
-            $this->connection->execute('SELECT :password', [':password' => new \stdClass()]);
+            $this->connection->execute('SELECT :password', [':password' => new \stdClass()]); // @phpstan-ignore argument.type
             self::fail('Expected a TypeError');
-        } catch (\TypeError $error) {
+        } catch (\TypeError $error) { // @phpstan-ignore catch.neverThrown
             self::assertStringNotContainsString('secret', $error->getMessage());
         }
     }
@@ -372,6 +375,7 @@ final class SqliteQueryTest extends TestCase
             'SELECT ? AS null_value, ? AS bool_value, ? AS int_value, ? AS float_value, ? AS text_value, ? AS blob_value',
             [null, true, 42, 1.5, 'text', new SqliteBlob("\0bytes")],
         )->fetchRow();
+        /** @var array{null_value: null, bool_value: int, int_value: int, float_value: float, text_value: string, blob_value: SqliteBlob} $row */
 
         self::assertNull($row['null_value']);
         self::assertSame(1, $row['bool_value']);
@@ -495,7 +499,9 @@ final class SqliteQueryTest extends TestCase
             );
         }
 
-        self::assertSame(0, $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
+        $row = $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow();
+        /** @var array{count: int} $row */
+        self::assertSame(0, $row['count']);
     }
 
     public function testExplainOfDmlRemainsReadOnly(): void
@@ -504,7 +510,9 @@ final class SqliteQueryTest extends TestCase
 
         self::assertNotNull($this->connection->query("EXPLAIN UPDATE entries SET value = 'updated'")->fetchRow());
         self::assertNotNull($this->connection->query("EXPLAIN QUERY PLAN DELETE FROM entries WHERE value = 'deleted'")->fetchRow());
-        self::assertSame(0, $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
+        $row = $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow();
+        /** @var array{count: int} $row */
+        self::assertSame(0, $row['count']);
     }
 
     public function testTableDefinitionTextDoesNotHideUnambiguousInsertId(): void

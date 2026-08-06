@@ -21,8 +21,10 @@ use Amp\Parallel\Context\ProcessContextFactory;
 
 final class RecordingProcessContextFactory implements ContextFactory
 {
+    /** @var ProcessContext<null, mixed, array<string, mixed>> */
     public ProcessContext $context;
 
+    /** @return Context<null, mixed, array<string, mixed>> */
     public function start(string|array $script, ?Cancellation $cancellation = null): Context
     {
         return $this->context = (new ProcessContextFactory())->start($script, $cancellation);

@@ -31,6 +31,7 @@ final class Result implements SqliteResult, \IteratorAggregate
     use ForbidCloning;
     use ForbidSerialization;
 
+    /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
     private bool $explicitlyClosed = false;
@@ -72,9 +73,6 @@ final class Result implements SqliteResult, \IteratorAggregate
         $this->close();
     }
 
-    /**
-     * @psalm-suppress MixedReturnTypeCoercion PHP converts numeric column names to integer array keys.
-     */
     public function fetchRow(): ?array
     {
         if ($this->closed) {
@@ -100,6 +98,7 @@ final class Result implements SqliteResult, \IteratorAggregate
             $this->finish();
         }
 
+        // @phpstan-ignore return.type (PHP converts numeric column names to integer array keys.)
         return $row;
     }
 

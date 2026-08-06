@@ -37,9 +37,10 @@ use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 /**
  * @internal
  *
- * @psalm-type RowValue = null|int|float|string|SqliteBlob
- * @psalm-type Row = array<array-key, RowValue>
- * @psalm-type ResultPayload = array{
+ * @phpstan-type ParameterValue = null|bool|int|float|string|SqliteBlob
+ * @phpstan-type RowValue = null|int|float|string|SqliteBlob
+ * @phpstan-type Row = array<array-key, RowValue>
+ * @phpstan-type ResultPayload = array{
  *     result_id: int|null,
  *     rows: list<Row>,
  *     exhausted: bool,
@@ -48,7 +49,7 @@ use Fabpot\Amp\Sqlite\SqliteTransactionMode;
  *     column_names: list<string>|null,
  *     last_insert_id: int|null
  * }
- * @psalm-type BatchPayload = array{rows: list<Row>, exhausted: bool}
+ * @phpstan-type BatchPayload = array{rows: list<Row>, exhausted: bool}
  */
 final class Connection implements SqliteConnection
 {
@@ -57,6 +58,7 @@ final class Connection implements SqliteConnection
 
     private readonly LocalMutex $mutex;
     private readonly LocalMutex $requestMutex;
+    /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onClose;
 
     /** @var \WeakMap<Result, true> */
@@ -79,8 +81,12 @@ final class Connection implements SqliteConnection
     private ?\WeakReference $activeTransaction = null;
     private ?Lock $transactionLock = null;
     private int $transactionLeases = 0;
+    /** @var DeferredFuture<null>|null */
     private ?DeferredFuture $transactionIdle = null;
 
+    /**
+     * @param Context<null, mixed, array<string, mixed>> $context
+     */
     public function __construct(
         private readonly SqliteConfig $config,
         private readonly Context $context,
@@ -116,6 +122,9 @@ final class Connection implements SqliteConnection
         return $this->prepareStatement($sql);
     }
 
+    /**
+     * @param array<array-key, null|bool|int|float|string|SqliteBlob> $params
+     */
     public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult
     {
         return $this->run($sql, $params, true, false);
@@ -272,11 +281,17 @@ final class Connection implements SqliteConnection
         return $this->prepareStatement($sql, $transaction);
     }
 
+    /**
+     * @param array<array-key, ParameterValue> $params
+     */
     public function executeInTransaction(string $sql, #[\SensitiveParameter] array $params, Transaction $transaction): SqliteResult
     {
         return $this->run($sql, $params, true, $transaction);
     }
 
+    /**
+     * @param array<array-key, ParameterValue> $params
+     */
     public function executeStatement(int $statementId, string $sql, #[\SensitiveParameter] array $params, ?Transaction $transaction, Statement $statement): SqliteResult
     {
         $this->assertOpen();
@@ -443,6 +458,9 @@ final class Connection implements SqliteConnection
         return $statement;
     }
 
+    /**
+     * @param array<array-key, ParameterValue> $params
+     */
     private function run(string $sql, #[\SensitiveParameter] array $params, bool $bindParameters, Transaction|false $transaction): SqliteResult
     {
         $this->assertOpen();
@@ -681,7 +699,7 @@ final class Connection implements SqliteConnection
     }
 
     /**
-     * @psalm-assert-if-true list<Row> $value
+     * @phpstan-assert-if-true list<Row> $value
      */
     private static function isRowList(mixed $value): bool
     {
@@ -708,7 +726,7 @@ final class Connection implements SqliteConnection
     }
 
     /**
-     * @psalm-assert-if-true list<string>|null $value
+     * @phpstan-assert-if-true list<string>|null $value
      */
     private static function isStringListOrNull(mixed $value): bool
     {
@@ -950,6 +968,9 @@ final class Connection implements SqliteConnection
         }
     }
 
+    /**
+     * @param array<array-key, ParameterValue> $params
+     */
     private static function validateParameterValues(#[\SensitiveParameter] array $params): void
     {
         foreach ($params as $value) {

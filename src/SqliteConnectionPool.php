@@ -30,7 +30,6 @@ use Fabpot\Amp\Sqlite\Internal\StatementPool;
  */
 final class SqliteConnectionPool extends SqlCommonConnectionPool implements SqliteConnection
 {
-    /** @psalm-suppress InvalidClassConstantType The parent constant is not final and may be overridden. */
     public const DEFAULT_MAX_CONNECTIONS = 10;
 
     private bool $closing = false;
@@ -115,6 +114,9 @@ final class SqliteConnectionPool extends SqlCommonConnectionPool implements Sqli
         return $result;
     }
 
+    /**
+     * @param array<array-key, null|bool|int|float|string|SqliteBlob> $params
+     */
     public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult
     {
         $connection = $this->pop();

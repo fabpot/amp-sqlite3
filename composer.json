@@ -34,8 +34,8 @@
     },
     "require-dev": {
         "amphp/php-cs-fixer-config": "^2",
-        "phpunit/phpunit": "^13.2",
-        "psalm/phar": "6.16.1"
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^13.2"
     },
     "autoload": {
         "psr-4": {
@@ -50,12 +50,12 @@
     "scripts": {
         "check": [
             "@cs",
-            "@psalm",
+            "@phpstan",
             "@test"
         ],
         "cs": "php-cs-fixer fix --show-progress=none --diff --dry-run",
         "cs-fix": "php-cs-fixer fix --show-progress=none --diff",
-        "psalm": "@php ./vendor/bin/psalm.phar --no-cache",
+        "phpstan": "@php ./vendor/bin/phpstan analyse --no-progress",
         "test": "@php -dzend.assertions=1 -dassert.exception=1 ./vendor/bin/phpunit"
     }
 }

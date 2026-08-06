@@ -37,6 +37,7 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
 
     public const DEFAULT_CHUNK_SIZE = 8192;
 
+    /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
     private bool $readPending = false;

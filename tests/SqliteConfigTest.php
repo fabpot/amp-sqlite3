@@ -30,6 +30,7 @@ final class SqliteConfigTest extends TestCase
         new SqliteConfig($path);
     }
 
+    /** @return iterable<string, array{string}> */
     public static function provideInvalidPaths(): iterable
     {
         yield 'empty' => [''];
@@ -72,6 +73,7 @@ final class SqliteConfigTest extends TestCase
         (new SqliteConfig(':memory:'))->withBusyTimeout($busyTimeout);
     }
 
+    /** @return iterable<array{int}> */
     public static function provideInvalidBusyTimeouts(): iterable
     {
         yield [-1];
@@ -86,6 +88,7 @@ final class SqliteConfigTest extends TestCase
         (new SqliteConfig(':memory:'))->withBatchSize($batchSize);
     }
 
+    /** @return iterable<array{int}> */
     public static function provideInvalidBatchSizes(): iterable
     {
         yield [0];
@@ -100,6 +103,7 @@ final class SqliteConfigTest extends TestCase
         (new SqliteConfig(':memory:'))->withPragma($name, 1);
     }
 
+    /** @return iterable<array{string}> */
     public static function provideInvalidPragmaNames(): iterable
     {
         yield [''];
@@ -116,6 +120,7 @@ final class SqliteConfigTest extends TestCase
         (new SqliteConfig(':memory:'))->withPragma($name, 1);
     }
 
+    /** @return iterable<array{string}> */
     public static function provideReservedPragmaNames(): iterable
     {
         yield ['journal_mode'];
@@ -130,9 +135,10 @@ final class SqliteConfigTest extends TestCase
     {
         $this->expectException(\TypeError::class);
 
-        (new SqliteConfig(':memory:'))->withPragma('cache_size', $value);
+        (new SqliteConfig(':memory:'))->withPragma('cache_size', $value); // @phpstan-ignore argument.type
     }
 
+    /** @return iterable<array{null|array<mixed>}> */
     public static function provideUnsupportedPragmaValues(): iterable
     {
         yield [null];

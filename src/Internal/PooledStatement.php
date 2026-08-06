@@ -15,6 +15,7 @@ namespace Fabpot\Amp\Sqlite\Internal;
 
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
+use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
@@ -29,8 +30,8 @@ final class PooledStatement implements SqliteStatement
     /** @var null|\Closure():void */
     private ?\Closure $release;
 
-    /** @var object{count: int} */
-    private readonly object $references;
+    /** @var \stdClass&object{count: int} */
+    private readonly \stdClass $references;
 
     /**
      * @param \Closure():void $release
@@ -41,9 +42,10 @@ final class PooledStatement implements SqliteStatement
         \Closure $release,
         private readonly ?\Closure $awaitBusyResource = null,
     ) {
-        $this->references = $references = new class {
-            public int $count = 1;
-        };
+        $references = new \stdClass();
+        $references->count = 1;
+        /** @var \stdClass&object{count: int} $references */
+        $this->references = $references;
         $this->release = static function () use ($references, $release): void {
             if (--$references->count === 0) {
                 $release();
@@ -58,9 +60,13 @@ final class PooledStatement implements SqliteStatement
         $this->dispose();
     }
 
+    /**
+     * @param array<array-key, null|bool|int|float|string|SqliteBlob> $params
+     */
     public function execute(#[\SensitiveParameter] array $params = []): SqliteResult
     {
-        if ($this->release === null) {
+        $release = $this->release;
+        if ($release === null) {
             throw new SqliteException('The statement has been closed');
         }
 
@@ -71,7 +77,7 @@ final class PooledStatement implements SqliteStatement
         $result = $this->statement->execute($params);
         ++$this->references->count;
 
-        return new PooledResult($result, $this->release);
+        return new PooledResult($result, $release);
     }
 
     public function getQuery(): string

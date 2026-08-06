@@ -16,6 +16,7 @@ namespace Fabpot\Amp\Sqlite\Internal;
 use Amp\DeferredFuture;
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
+use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
@@ -26,6 +27,7 @@ final class Statement implements SqliteStatement
     use ForbidCloning;
     use ForbidSerialization;
 
+    /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
     private int $lastUsedAt;
@@ -46,6 +48,9 @@ final class Statement implements SqliteStatement
         $this->close();
     }
 
+    /**
+     * @param array<array-key, null|bool|int|float|string|SqliteBlob> $params
+     */
     public function execute(#[\SensitiveParameter] array $params = []): SqliteResult
     {
         if ($this->closed) {

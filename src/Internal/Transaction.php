@@ -18,6 +18,7 @@ use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
 use Amp\Sync\LocalMutex;
 use Amp\Sync\Lock;
+use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteBlobStream;
 use Fabpot\Amp\Sqlite\SqliteResult;
@@ -32,8 +33,11 @@ final class Transaction implements SqliteTransaction
     use ForbidCloning;
     use ForbidSerialization;
 
+    /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onCommit;
+    /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onRollback;
+    /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onClose;
     private readonly LocalMutex $stateMutex;
 
@@ -43,6 +47,7 @@ final class Transaction implements SqliteTransaction
     private bool $active = true;
     private int $nextSavepointId = 1;
     private ?Transaction $activeNested = null;
+    /** @var DeferredFuture<null>|null */
     private ?DeferredFuture $nestedBusy = null;
 
     public function __construct(
@@ -107,6 +112,9 @@ final class Transaction implements SqliteTransaction
         }
     }
 
+    /**
+     * @param array<array-key, null|bool|int|float|string|SqliteBlob> $params
+     */
     public function execute(string $sql, #[\SensitiveParameter] array $params = []): SqliteResult
     {
         $lock = $this->acquireOperation();
@@ -173,9 +181,17 @@ final class Transaction implements SqliteTransaction
                 $this->connection->releaseTransaction($this);
             } else {
                 $onCommit = $this->onCommit;
-                $this->parent->onCommit(static fn () => $onCommit->isComplete() || $onCommit->complete());
+                $this->parent->onCommit(static function () use ($onCommit): void {
+                    if (!$onCommit->isComplete()) {
+                        $onCommit->complete();
+                    }
+                });
                 $onRollback = $this->onRollback;
-                $this->parent->onRollback(static fn () => $onRollback->isComplete() || $onRollback->complete());
+                $this->parent->onRollback(static function () use ($onRollback): void {
+                    if (!$onRollback->isComplete()) {
+                        $onRollback->complete();
+                    }
+                });
             }
             $this->onClose->complete();
         } finally {

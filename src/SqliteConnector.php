@@ -59,6 +59,7 @@ final class SqliteConnector implements SqlConnector
                 throw new \RuntimeException('SQLite connections require process isolation');
             }
 
+            /** @var ProcessContext<null, mixed, array<string, mixed>> $context */
             $context->send([
                 'path' => $path,
                 'open_mode' => $config->getOpenMode()->name,
@@ -80,7 +81,7 @@ final class SqliteConnector implements SqlConnector
                 throw new SqliteConnectionException('The SQLite child process sent an invalid startup response');
             }
         } catch (\Throwable $exception) {
-            if ($context !== null && $exception instanceof ContextException) {
+            if ($context instanceof ProcessContext && $exception instanceof ContextException) {
                 $exception = self::findChildFailure($context, $exception);
             }
             $context?->close();
@@ -92,6 +93,9 @@ final class SqliteConnector implements SqlConnector
         return new Connection($config, $context);
     }
 
+    /**
+     * @param ProcessContext<null, mixed, array<string, mixed>> $context
+     */
     private static function findChildFailure(ProcessContext $context, ContextException $exception): \Throwable
     {
         try {

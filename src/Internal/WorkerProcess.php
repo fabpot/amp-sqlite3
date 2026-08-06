@@ -24,14 +24,14 @@ use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
  *
  * @internal
  *
- * @psalm-type ParameterValue = null|bool|int|float|string|SqliteBlob
- * @psalm-type RowValue = null|int|float|string|SqliteBlob
- * @psalm-type Row = array<array-key, RowValue>
- * @psalm-type InsertTarget = array{database: string, table: string}
- * @psalm-type StatementMetadata = array{insert: InsertTarget|null, ambiguous_insert: bool, update: bool, delete: bool}
- * @psalm-type OpenConfig = array{
+ * @phpstan-type ParameterValue = null|bool|int|float|string|SqliteBlob
+ * @phpstan-type RowValue = null|int|float|string|SqliteBlob
+ * @phpstan-type Row = array<array-key, RowValue>
+ * @phpstan-type InsertTarget = array{database: string, table: string}
+ * @phpstan-type StatementMetadata = array{insert: InsertTarget|null, ambiguous_insert: bool, update: bool, delete: bool}
+ * @phpstan-type OpenConfig = array{
  *     path: string,
- *     open_mode: string,
+ *     open_mode: 'ReadOnly'|'ReadWrite'|'ReadWriteCreate',
  *     journal_mode: string,
  *     synchronous_mode: string,
  *     foreign_keys: bool,
@@ -255,6 +255,8 @@ final class WorkerProcess
 
     /**
      * @param array<string, mixed> $request
+     *
+     * @return positive-int
      */
     private static function requirePositiveInt(array $request, string $key): int
     {
@@ -396,6 +398,9 @@ final class WorkerProcess
             self::requireString($request, 'database'),
             $flags,
         );
+        if ($blob === false) {
+            throw new \RuntimeException('Could not open SQLite BLOB');
+        }
         $blobId = $this->nextBlobId++;
         $this->blobs[$blobId] = $blob;
         $stat = \fstat($blob);
@@ -407,6 +412,8 @@ final class WorkerProcess
     }
 
     /**
+     * @param positive-int $length
+     *
      * @return array{bytes: string}
      */
     private function readBlob(int $blobId, int $length): array
@@ -414,7 +421,6 @@ final class WorkerProcess
         if (!isset($this->blobs[$blobId])) {
             throw new ProtocolError("Unknown BLOB ID '{$blobId}'");
         }
-
         $bytes = \fread($this->blobs[$blobId], $length);
         if ($bytes === false) {
             throw new \RuntimeException('Could not read from SQLite BLOB');
@@ -758,6 +764,7 @@ final class WorkerProcess
     }
 
     /**
+     * @param StatementMetadata|null $metadata
      * @param-out StatementMetadata $metadata
      */
     private function prepareWithMetadata(string $sql, ?array &$metadata): \SQLite3Stmt|false

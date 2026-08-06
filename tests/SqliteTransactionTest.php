@@ -13,11 +13,14 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
+use Amp\Future;
 use Amp\Sql\SqlTransactionIsolationLevel;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteException;
+use Fabpot\Amp\Sqlite\SqliteResult;
+use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
@@ -99,7 +102,9 @@ final class SqliteTransactionTest extends TestCase
 
     public function testConcurrentBeginTransactionCallsSerialize(): void
     {
+        /** @var Future<SqliteTransaction> $first */
         $first = async(fn () => $this->connection->beginTransaction());
+        /** @var Future<SqliteTransaction> $second */
         $second = async(fn () => $this->connection->beginTransaction());
 
         $transaction = $first->await();
@@ -172,7 +177,9 @@ final class SqliteTransactionTest extends TestCase
     public function testConcurrentNestedTransactionsCannotCorruptSavepoints(): void
     {
         $transaction = $this->connection->beginTransaction();
+        /** @var Future<SqliteTransaction> $first */
         $first = async(fn () => $transaction->beginTransaction());
+        /** @var Future<SqliteTransaction> $second */
         $second = async(fn () => $transaction->beginTransaction());
 
         $nested = $first->await();
@@ -300,7 +307,9 @@ final class SqliteTransactionTest extends TestCase
         $this->connection->execute('INSERT INTO entries VALUES (?), (?), (?)', ['a', 'b', 'c']);
         $transaction = $this->connection->beginTransaction();
 
+        /** @var Future<list<array{value: string}>> $first */
         $first = async(fn () => \iterator_to_array($transaction->query('SELECT value FROM entries ORDER BY value')));
+        /** @var Future<list<array{value: string}>> $second */
         $second = async(fn () => \iterator_to_array($transaction->query('SELECT value FROM entries ORDER BY value DESC')));
         $third = async(fn () => $transaction->execute('INSERT INTO entries VALUES (?)', ['late']));
 
@@ -317,7 +326,9 @@ final class SqliteTransactionTest extends TestCase
         $this->connection->execute('INSERT INTO entries VALUES (?), (?)', ['a', 'b']);
         $transaction = $this->connection->beginTransaction();
 
+        /** @var Future<SqliteResult> $first */
         $first = async(fn () => $transaction->query('SELECT value FROM entries ORDER BY value'));
+        /** @var Future<SqliteResult> $second */
         $second = async(fn () => $transaction->query('SELECT value FROM entries ORDER BY value DESC'));
 
         $firstResult = $first->await();

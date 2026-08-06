@@ -29,8 +29,8 @@ final class PooledTransaction implements SqliteTransaction
     use ForbidCloning;
     use ForbidSerialization;
 
-    /** @var object{count: int} */
-    private readonly object $references;
+    /** @var \stdClass&object{count: int} */
+    private readonly \stdClass $references;
 
     /** @var \Closure():void */
     private readonly \Closure $release;
@@ -42,9 +42,10 @@ final class PooledTransaction implements SqliteTransaction
         private readonly SqliteTransaction $transaction,
         \Closure $release,
     ) {
-        $this->references = $references = new class {
-            public int $count = 1;
-        };
+        $references = new \stdClass();
+        $references->count = 1;
+        /** @var \stdClass&object{count: int} $references */
+        $this->references = $references;
         $this->release = static function () use ($references, $release): void {
             if (--$references->count === 0) {
                 $release();

@@ -311,7 +311,7 @@ final class SqliteConfig extends SqlConfig
     }
 
     /**
-     * @param string|array{class-string, string} $callback
+     * @param string|array<mixed> $callback
      */
     private static function normalizeCallable(string|array $callback): string
     {
