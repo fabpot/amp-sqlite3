@@ -13,14 +13,12 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
-use Amp\Future;
 use Amp\Sql\SqlTransactionIsolationLevel;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnectionPool;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
-use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
@@ -56,14 +54,14 @@ final class SqliteConnectionPoolTest extends TestCase
     public function testRejectsInvalidPoolLimits(): void
     {
         try {
-            new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 0); // @phpstan-ignore argument.type
+            new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 0);
             self::fail('Expected the invalid connection limit to fail');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame('Pool must contain at least one connection', $exception->getMessage());
         }
 
         try {
-            new SqliteConnectionPool(new SqliteConfig($this->path), idleTimeout: 0); // @phpstan-ignore argument.type
+            new SqliteConnectionPool(new SqliteConfig($this->path), idleTimeout: 0);
             self::fail('Expected the invalid idle timeout to fail');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame('The idle timeout must be 1 or greater', $exception->getMessage());
@@ -99,8 +97,6 @@ final class SqliteConnectionPoolTest extends TestCase
     public function testClosingPoolRejectsWaitingOperationWithConnectionException(): void
     {
         $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize(1), maxConnections: 1);
-
-        $result = null;
 
         try {
             $result = $pool->query('SELECT 1 UNION ALL SELECT 2');
@@ -219,9 +215,7 @@ final class SqliteConnectionPoolTest extends TestCase
             self::assertTrue($command->isClosed());
             self::assertSame(1, $pool->getIdleConnectionCount());
             $result->await();
-            $row = $pool->query('SELECT COUNT(*) AS count FROM entries')->fetchRow();
-            /** @var array{count: int} $row */
-            self::assertSame(2, $row['count']);
+            self::assertSame(2, $pool->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
         } finally {
             $pool->close();
         }
@@ -282,9 +276,7 @@ final class SqliteConnectionPoolTest extends TestCase
     {
         $this->pool->execute('INSERT INTO entries VALUES (?)', ['row']);
 
-        /** @var Future<SqliteResult> $first */
         $first = async(fn () => $this->pool->query('SELECT value FROM entries UNION ALL SELECT value FROM entries'));
-        /** @var Future<SqliteResult> $second */
         $second = async(fn () => $this->pool->query('SELECT value FROM entries'));
 
         $firstResult = $first->await();
@@ -427,7 +419,6 @@ final class SqliteConnectionPoolTest extends TestCase
             self::assertSame(['value' => 'first'], $result->fetchRow());
 
             $statement->close();
-            /** @var Future<SqliteResult> $query */
             $query = async(fn () => $pool->query('SELECT 42 AS answer'));
             delay(0.05);
             self::assertFalse($query->isComplete());
@@ -443,7 +434,6 @@ final class SqliteConnectionPoolTest extends TestCase
     public function testOpenBlobReleasesConnectionOnClose(): void
     {
         $rowId = $this->pool->query('INSERT INTO entries VALUES (zeroblob(3))')->getLastInsertId();
-        self::assertIsInt($rowId);
 
         $blob = $this->pool->openBlob('entries', 'value', $rowId);
         $idleBefore = $this->pool->getIdleConnectionCount();

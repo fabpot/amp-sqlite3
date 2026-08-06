@@ -53,13 +53,9 @@ final class SqliteBlobStreamTest extends TestCase
 
         self::assertSame(9_000, $blob->getLength());
         self::assertSame(0, $blob->getPosition());
-        /** @var string $chunk */
-        $chunk = $blob->read();
-        self::assertSame(8_192, \strlen($chunk));
+        self::assertSame(8_192, \strlen($blob->read()));
         self::assertSame(8_192, $blob->getPosition());
-        /** @var string $chunk */
-        $chunk = $blob->read();
-        self::assertSame(808, \strlen($chunk));
+        self::assertSame(808, \strlen($blob->read()));
         self::assertNull($blob->read());
         self::assertTrue($blob->isClosed());
     }

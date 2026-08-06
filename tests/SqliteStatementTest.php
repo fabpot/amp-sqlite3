@@ -45,7 +45,6 @@ final class SqliteStatementTest extends TestCase
         $statement->execute([':name' => 'first', ':contents' => new SqliteBlob('one')]);
         $statement->execute([':name' => 'second', ':contents' => new SqliteBlob('two')]);
 
-        /** @var list<array{name: string, contents: SqliteBlob}> $rows */
         $rows = \iterator_to_array($this->connection->query('SELECT * FROM files ORDER BY name'));
         self::assertSame('first', $rows[0]['name']);
         self::assertSame('one', $rows[0]['contents']->getBytes());

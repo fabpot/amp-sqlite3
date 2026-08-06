@@ -98,7 +98,6 @@ final class Result implements SqliteResult, \IteratorAggregate
             $this->finish();
         }
 
-        // @phpstan-ignore return.type (PHP converts numeric column names to integer array keys.)
         return $row;
     }
 

@@ -13,15 +13,8 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
-use Amp\Cancellation;
-use Amp\Future;
-use Amp\Parallel\Context\Context;
-use Amp\Parallel\Context\ContextFactory;
-use Amp\Parallel\Context\ProcessContext;
-use Amp\Parallel\Context\ProcessContextFactory;
 use Amp\Sql\SqlConfig;
 use Fabpot\Amp\Sqlite\SqliteConfig;
-use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteJournalMode;
@@ -65,7 +58,6 @@ final class SqliteConnectionTest extends TestCase
         $directory = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8));
         \mkdir($directory);
         $workingDirectory = \getcwd();
-        self::assertIsString($workingDirectory);
         \chdir($directory);
 
         try {
@@ -113,7 +105,7 @@ final class SqliteConnectionTest extends TestCase
 
         $this->expectException(\TypeError::class);
 
-        (new SqliteConnector())->connect($config); // @phpstan-ignore argument.type
+        (new SqliteConnector())->connect($config);
     }
 
     public function testRejectsInheritedServerConfiguration(): void
@@ -132,9 +124,8 @@ final class SqliteConnectionTest extends TestCase
 
     public function testWrapsContextFactoryFailuresAsConnectionExceptions(): void
     {
-        $factory = new class implements ContextFactory {
-            /** @return Context<null, mixed, array<string, mixed>> */
-            public function start(string|array $script, ?Cancellation $cancellation = null): Context
+        $factory = new class implements \Amp\Parallel\Context\ContextFactory {
+            public function start(string|array $script, ?\Amp\Cancellation $cancellation = null): \Amp\Parallel\Context\Context
             {
                 throw new \RuntimeException('Factory failed');
             }
@@ -178,9 +169,7 @@ final class SqliteConnectionTest extends TestCase
     {
         $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
         $connector = new SqliteConnector();
-        /** @var array<int, SqliteConnection> $connections */
         $connections = [];
-        /** @var list<Future<SqliteConnection>> $futures */
         $futures = [];
 
         try {
@@ -214,7 +203,6 @@ final class SqliteConnectionTest extends TestCase
         }
     }
 
-    /** @return iterable<string, array{SqliteJournalMode}> */
     public static function provideWalModes(): iterable
     {
         yield 'automatic' => [SqliteJournalMode::Automatic];
@@ -353,14 +341,12 @@ final class SqliteConnectionTest extends TestCase
     }
 }
 
-final class ProtocolErrorProcessContextFactory implements ContextFactory
+final class ProtocolErrorProcessContextFactory implements \Amp\Parallel\Context\ContextFactory
 {
-    /** @var ProcessContext<null, mixed, array<string, mixed>> */
-    public ProcessContext $context;
+    public \Amp\Parallel\Context\ProcessContext $context;
 
-    /** @return Context<null, mixed, array<string, mixed>> */
-    public function start(string|array $script, ?Cancellation $cancellation = null): Context
+    public function start(string|array $script, ?\Amp\Cancellation $cancellation = null): \Amp\Parallel\Context\Context
     {
-        return $this->context = (new ProcessContextFactory())->start($script, $cancellation);
+        return $this->context = (new \Amp\Parallel\Context\ProcessContextFactory())->start($script, $cancellation);
     }
 }

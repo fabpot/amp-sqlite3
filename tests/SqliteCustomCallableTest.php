@@ -98,19 +98,15 @@ final class SqliteCustomCallableTest extends TestCase
         $register(new SqliteConfig(':memory:'));
     }
 
-    /** @return iterable<string, array{\Closure(SqliteConfig): SqliteConfig}> */
     public static function provideInvalidRegistrations(): iterable
     {
         yield 'unknown callback' => [static fn (SqliteConfig $c) => $c->withFunction('f', 'NonExistent::method')];
-        // @phpstan-ignore argument.type
         yield 'unknown array callback' => [static fn (SqliteConfig $c) => $c->withFunction('f', ['NonExistent', 'method'])];
         yield 'non-static method' => [static fn (SqliteConfig $c) => $c->withFunction('f', [SqlCallables::class, 'instanceMethod'])];
-        // @phpstan-ignore argument.type
         yield 'malformed array callback' => [static fn (SqliteConfig $c) => $c->withFunction('f', ['strrev'])];
         yield 'invalid function name' => [static fn (SqliteConfig $c) => $c->withFunction('bad name!', 'strrev')];
         yield 'invalid function argument count' => [static fn (SqliteConfig $c) => $c->withFunction('f', 'strrev', -2)];
         yield 'invalid collation name' => [static fn (SqliteConfig $c) => $c->withCollation('bad name!', 'strcmp')];
-        // @phpstan-ignore argument.type
         yield 'unknown aggregate step' => [static fn (SqliteConfig $c) => $c->withAggregate('a', ['NonExistent', 'step'], 'strrev')];
         yield 'invalid aggregate argument count' => [static fn (SqliteConfig $c) => $c->withAggregate('a', 'strrev', 'strrev', -2)];
     }

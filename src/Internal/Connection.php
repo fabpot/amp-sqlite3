@@ -34,23 +34,7 @@ use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 
-/**
- * @internal
- *
- * @phpstan-type ParameterValue = null|bool|int|float|string|SqliteBlob
- * @phpstan-type RowValue = null|int|float|string|SqliteBlob
- * @phpstan-type Row = array<array-key, RowValue>
- * @phpstan-type ResultPayload = array{
- *     result_id: int|null,
- *     rows: list<Row>,
- *     exhausted: bool,
- *     row_count: int|null,
- *     column_count: int|null,
- *     column_names: list<string>|null,
- *     last_insert_id: int|null
- * }
- * @phpstan-type BatchPayload = array{rows: list<Row>, exhausted: bool}
- */
+/** @internal */
 final class Connection implements SqliteConnection
 {
     use ForbidCloning;
@@ -282,7 +266,7 @@ final class Connection implements SqliteConnection
     }
 
     /**
-     * @param array<array-key, ParameterValue> $params
+     * @param array<array-key, SqliteParameterValue> $params
      */
     public function executeInTransaction(string $sql, #[\SensitiveParameter] array $params, Transaction $transaction): SqliteResult
     {
@@ -290,7 +274,7 @@ final class Connection implements SqliteConnection
     }
 
     /**
-     * @param array<array-key, ParameterValue> $params
+     * @param array<array-key, SqliteParameterValue> $params
      */
     public function executeStatement(int $statementId, string $sql, #[\SensitiveParameter] array $params, ?Transaction $transaction, Statement $statement): SqliteResult
     {
@@ -459,7 +443,7 @@ final class Connection implements SqliteConnection
     }
 
     /**
-     * @param array<array-key, ParameterValue> $params
+     * @param array<array-key, SqliteParameterValue> $params
      */
     private function run(string $sql, #[\SensitiveParameter] array $params, bool $bindParameters, Transaction|false $transaction): SqliteResult
     {
@@ -506,7 +490,7 @@ final class Connection implements SqliteConnection
     }
 
     /**
-     * @param ResultPayload $value
+     * @param SqliteResultPayload $value
      */
     private function createResult(array $value, string $sql, ?Lock $lock, ?Transaction $transaction = null): SqliteResult
     {
@@ -583,7 +567,7 @@ final class Connection implements SqliteConnection
     /**
      * @param array<string, mixed> $data
      *
-     * @return ResultPayload
+     * @return SqliteResultPayload
      */
     private function requestResultPayload(string $operation, string $sql, #[\SensitiveParameter] array $data): array
     {
@@ -628,14 +612,14 @@ final class Connection implements SqliteConnection
             $this->invalidResponse();
         }
 
-        /** @var ResultPayload $value */
+        /** @var SqliteResultPayload $value */
         return $value;
     }
 
     /**
      * @param array<string, mixed> $data
      *
-     * @return BatchPayload
+     * @return SqliteBatchPayload
      */
     private function requestBatchPayload(string $operation, string $sql, array $data): array
     {
@@ -644,7 +628,7 @@ final class Connection implements SqliteConnection
             $this->invalidResponse();
         }
 
-        /** @var BatchPayload $value */
+        /** @var SqliteBatchPayload $value */
         if (!$value['exhausted'] && $value['rows'] === []) {
             $this->invalidResponse();
         }
@@ -698,9 +682,6 @@ final class Connection implements SqliteConnection
         return $value['bytes'];
     }
 
-    /**
-     * @phpstan-assert-if-true list<Row> $value
-     */
     private static function isRowList(mixed $value): bool
     {
         if (!\is_array($value) || !\array_is_list($value)) {
@@ -725,9 +706,6 @@ final class Connection implements SqliteConnection
             || $value instanceof SqliteBlob;
     }
 
-    /**
-     * @phpstan-assert-if-true list<string>|null $value
-     */
     private static function isStringListOrNull(mixed $value): bool
     {
         if ($value === null) {
@@ -969,7 +947,7 @@ final class Connection implements SqliteConnection
     }
 
     /**
-     * @param array<array-key, ParameterValue> $params
+     * @param array<array-key, SqliteParameterValue> $params
      */
     private static function validateParameterValues(#[\SensitiveParameter] array $params): void
     {

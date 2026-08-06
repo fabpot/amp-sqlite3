@@ -23,27 +23,6 @@ use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
  * Runs inside the child process and executes protocol operations against the native SQLite3 connection.
  *
  * @internal
- *
- * @phpstan-type ParameterValue = null|bool|int|float|string|SqliteBlob
- * @phpstan-type RowValue = null|int|float|string|SqliteBlob
- * @phpstan-type Row = array<array-key, RowValue>
- * @phpstan-type InsertTarget = array{database: string, table: string}
- * @phpstan-type StatementMetadata = array{insert: InsertTarget|null, ambiguous_insert: bool, update: bool, delete: bool}
- * @phpstan-type OpenConfig = array{
- *     path: string,
- *     open_mode: 'ReadOnly'|'ReadWrite'|'ReadWriteCreate',
- *     journal_mode: string,
- *     synchronous_mode: string,
- *     foreign_keys: bool,
- *     busy_timeout: int,
- *     batch_size: positive-int,
- *     trusted_schema: bool,
- *     extended_result_codes: bool,
- *     pragmas: array<string, bool|int|float|string>,
- *     functions: array<string, array{callback: string, arg_count: int, deterministic: bool}>,
- *     aggregates: array<string, array{step: string, final: string, arg_count: int}>,
- *     collations: array<string, string>
- * }
  */
 final class WorkerProcess
 {
@@ -62,14 +41,14 @@ final class WorkerProcess
     /** @var array<int, \SQLite3Stmt> */
     private array $statements = [];
 
-    /** @var \WeakMap<\SQLite3Stmt, StatementMetadata> */
+    /** @var \WeakMap<\SQLite3Stmt, SqliteStatementMetadata> */
     private \WeakMap $statementMetadata;
 
-    /** @var array<int, array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: Row|null}> */
+    /** @var array<int, array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: SqliteRow|null}> */
     private array $results = [];
 
     /**
-     * @return OpenConfig
+     * @return SqliteOpenConfig
      */
     public static function validateOpen(mixed $open): array
     {
@@ -100,7 +79,7 @@ final class WorkerProcess
             throw new ProtocolError('Invalid SQLite startup mode');
         }
 
-        /** @var OpenConfig $open */
+        /** @var SqliteOpenConfig $open */
         return $open;
     }
 
@@ -127,7 +106,7 @@ final class WorkerProcess
         };
 
         $this->database = new \SQLite3($open['path'], $flags);
-        /** @var \WeakMap<\SQLite3Stmt, StatementMetadata> $statementMetadata */
+        /** @var \WeakMap<\SQLite3Stmt, SqliteStatementMetadata> $statementMetadata */
         $statementMetadata = new \WeakMap();
         $this->statementMetadata = $statementMetadata;
         $this->database->enableExceptions(true);
@@ -286,7 +265,7 @@ final class WorkerProcess
     /**
      * @param array<string, mixed> $request
      *
-     * @return array<array-key, ParameterValue>
+     * @return array<array-key, SqliteParameterValue>
      */
     private static function requireParameters(array $request): array
     {
@@ -295,7 +274,7 @@ final class WorkerProcess
             throw new ProtocolError("Protocol field 'params' contains an invalid parameter");
         }
 
-        /** @var array<array-key, ParameterValue> $parameters */
+        /** @var array<array-key, SqliteParameterValue> $parameters */
         return $parameters;
     }
 
@@ -489,7 +468,7 @@ final class WorkerProcess
     }
 
     /**
-     * @return array{rows: list<Row>, exhausted: bool}
+     * @return array{rows: list<SqliteRow>, exhausted: bool}
      */
     private function fetch(int $resultId): array
     {
@@ -672,7 +651,7 @@ final class WorkerProcess
     }
 
     /**
-     * @return array{rows: list<Row>, exhausted: bool}
+     * @return array{rows: list<SqliteRow>, exhausted: bool}
      */
     private function fetchBatch(int $resultId): array
     {
@@ -704,9 +683,9 @@ final class WorkerProcess
     }
 
     /**
-     * @param Row $row
+     * @param SqliteRow $row
      *
-     * @return Row
+     * @return SqliteRow
      */
     private function convertRow(\SQLite3Result $result, array $row): array
     {
@@ -726,7 +705,7 @@ final class WorkerProcess
     }
 
     /**
-     * @param array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: Row|null} $resource
+     * @param array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: SqliteRow|null} $resource
      */
     private function closeNativeResult(array $resource): void
     {
@@ -764,12 +743,12 @@ final class WorkerProcess
     }
 
     /**
-     * @param StatementMetadata|null $metadata
-     * @param-out StatementMetadata $metadata
+     * @param SqliteStatementMetadata|null $metadata
+     * @param-out SqliteStatementMetadata $metadata
      */
     private function prepareWithMetadata(string $sql, ?array &$metadata): \SQLite3Stmt|false
     {
-        /** @var StatementMetadata $metadata */
+        /** @var SqliteStatementMetadata $metadata */
         $metadata = ['insert' => null, 'ambiguous_insert' => false, 'update' => false, 'delete' => false];
         $this->database->setAuthorizer(static function (
             int $action,
@@ -825,7 +804,7 @@ final class WorkerProcess
     }
 
     /**
-     * @return array{StatementMetadata, bool}
+     * @return array{SqliteStatementMetadata, bool}
      */
     private function analyzeStatement(string $sql): array
     {
@@ -881,7 +860,7 @@ final class WorkerProcess
     }
 
     /**
-     * @param InsertTarget $target
+     * @param SqliteInsertTarget $target
      */
     private function isOrdinaryRowIdTable(array $target): bool
     {
@@ -1044,7 +1023,7 @@ final class WorkerProcess
     }
 
     /**
-     * @param OpenConfig $open
+     * @param SqliteOpenConfig $open
      */
     private function applyJournalMode(array $open): void
     {
@@ -1081,7 +1060,7 @@ final class WorkerProcess
     }
 
     /**
-     * @param OpenConfig $open
+     * @param SqliteOpenConfig $open
      */
     private function applySynchronousMode(array $open): void
     {
