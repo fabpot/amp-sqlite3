@@ -343,7 +343,7 @@ Register lifecycle callbacks with `onCommit()` and `onRollback()`. Committing a 
 
 ## Upgrading from 0.2
 
-Version 1.0 freezes several contracts that were implicit or inconsistent in the preview releases:
+Version 0.3 changes several contracts that were implicit or inconsistent in earlier preview releases:
 
 - `query()` and `execute()` accept exactly one statement. Use atomic `executeScript()` for multi-statement, parameterless scripts. Row-producing DML, including `RETURNING`, is rejected before execution.
 - `getLastInsertId()` now returns `?int` and only reports an ID attributable to that result; check for `null` before using it.

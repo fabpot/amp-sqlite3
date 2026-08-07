@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0
+## 0.3
 
 - Make last-insert IDs result-specific and nullable
 - Scope transaction-prepared statements to their transaction
@@ -19,7 +19,6 @@
 - Surface the child-process error when a connection fails to start
 - Resolve Windows drive-relative paths against the working directory
 - Execute multi-statement SQL scripts atomically
-- Add a stable asynchronous SQLite driver with pooling, transactions, incremental BLOB I/O, backups, and custom SQL callables
 
 ## 0.2
 
