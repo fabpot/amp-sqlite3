@@ -1,7 +1,8 @@
 # Changelog
 
-## 1.0
+## 1.0.0
 
+- Promote the asynchronous SQLite driver to a stable release
 - Prevent concurrent result closure from invalidating the connection
 
 ## 0.3
