@@ -272,6 +272,30 @@ final class SqliteQueryTest extends TestCase
         $future->await();
     }
 
+    public function testFetchRowDuringCloseFailsWithoutInvalidatingTheConnection(): void
+    {
+        $this->connection->query('CREATE TABLE numbers (value INTEGER)');
+        $this->connection->execute('INSERT INTO numbers VALUES (1), (2), (3), (4), (5)');
+        $result = $this->connection->query('SELECT value FROM numbers');
+
+        self::assertSame(['value' => 1], $result->fetchRow());
+        self::assertSame(['value' => 2], $result->fetchRow());
+
+        $close = async(static fn () => $result->close());
+        delay(0); // the close request is now in flight
+
+        try {
+            $result->fetchRow();
+            self::fail('Expected fetching from a closing result to fail');
+        } catch (SqliteException $exception) {
+            self::assertSame('The SQLite result is closed', $exception->getMessage());
+        }
+
+        $close->await();
+
+        self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
+    }
+
     public function testFetchRowReturnsNullAfterExhaustion(): void
     {
         $result = $this->connection->query('SELECT 1 AS value');

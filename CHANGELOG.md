@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0
+
+- Prevent concurrent result closure from invalidating the connection
+
 ## 0.3
 
 - Make last-insert IDs result-specific and nullable

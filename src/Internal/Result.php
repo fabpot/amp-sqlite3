@@ -75,7 +75,7 @@ final class Result implements SqliteResult, \IteratorAggregate
 
     public function fetchRow(): ?array
     {
-        if ($this->closed) {
+        if ($this->closed || $this->explicitlyClosed) {
             if (!$this->explicitlyClosed && $this->exhausted) {
                 return null;
             }
@@ -105,7 +105,7 @@ final class Result implements SqliteResult, \IteratorAggregate
     {
         // Iteration must end silently on a closed result: SqlPooledResult drains the
         // inner iterator after an explicit close() to release the pooled connection.
-        while (!$this->closed && ($row = $this->fetchRow()) !== null) {
+        while (!$this->closed && !$this->explicitlyClosed && ($row = $this->fetchRow()) !== null) {
             yield $row;
         }
     }
