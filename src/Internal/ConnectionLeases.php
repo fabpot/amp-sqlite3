@@ -77,7 +77,7 @@ final class ConnectionLeases
     }
 
     /**
-     * Releases what acquireConnection() or acquireTransactionLease() returned once the request is done.
+     * Releases the connection lock or the transaction lease once a request that retains nothing is done.
      */
     public function release(?Lock $lock, bool $transactional): void
     {
@@ -110,12 +110,12 @@ final class ConnectionLeases
         });
     }
 
-    public function beginTransaction(Lock $lock): void
+    public function holdTransactionLock(Lock $lock): void
     {
         $this->transactionLock = $lock;
     }
 
-    public function endTransaction(): void
+    public function releaseTransactionLock(): void
     {
         $this->transactionLock?->release();
         $this->transactionLock = null;
@@ -147,7 +147,7 @@ final class ConnectionLeases
      */
     public function reset(): void
     {
-        $this->endTransaction();
+        $this->releaseTransactionLock();
         $this->transactionLeases = 0;
         /** @var \WeakMap<\stdClass, int> $transactionLeaseOwners */
         $transactionLeaseOwners = new \WeakMap();

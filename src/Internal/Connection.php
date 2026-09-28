@@ -106,7 +106,7 @@ final class Connection implements SqliteConnection
             throw $exception;
         }
 
-        $this->leases->beginTransaction($lock);
+        $this->leases->holdTransactionLock($lock);
         $transaction = new Transaction($this, $this->transactionMode);
         $this->activeTransaction = \WeakReference::create($transaction);
 
@@ -284,7 +284,7 @@ final class Connection implements SqliteConnection
         }
 
         $this->activeTransaction = null;
-        $this->leases->endTransaction();
+        $this->leases->releaseTransactionLock();
     }
 
     public function closeStatement(int $statementId, string $sql): void

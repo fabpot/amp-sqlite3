@@ -25,7 +25,7 @@ final class ConnectionLeasesTest extends TestCase
     public function testTransactionLeasesWaitForRetainedResourceWithoutLosingWakeups(): void
     {
         $leases = new ConnectionLeases();
-        $leases->beginTransaction($leases->acquireConnection());
+        $leases->holdTransactionLock($leases->acquireConnection());
         $leases->acquireTransactionLease();
         $resource = $leases->retain(null, true);
         $operation = static function () use ($leases): void {
@@ -41,7 +41,7 @@ final class ConnectionLeasesTest extends TestCase
         await($waiters);
 
         self::assertTrue($leases->isBusy());
-        $leases->endTransaction();
+        $leases->releaseTransactionLock();
         self::assertFalse($leases->isBusy());
     }
 
@@ -56,7 +56,7 @@ final class ConnectionLeasesTest extends TestCase
     public function testRetainedTransactionLeaseBelongsToTheTaskThatRetainedIt(): void
     {
         $leases = new ConnectionLeases();
-        $leases->beginTransaction($leases->acquireConnection());
+        $leases->holdTransactionLock($leases->acquireConnection());
         $leases->acquireTransactionLease();
         $resource = $leases->retain(null, true);
 
@@ -88,7 +88,7 @@ final class ConnectionLeasesTest extends TestCase
     public function testResetRejectsOperationsWaitingForTheTransaction(): void
     {
         $leases = new ConnectionLeases();
-        $leases->beginTransaction($leases->acquireConnection());
+        $leases->holdTransactionLock($leases->acquireConnection());
         $leases->acquireTransactionLease();
         // Dropping the returned lock would release the lease
         $resource = $leases->retain(null, true);
