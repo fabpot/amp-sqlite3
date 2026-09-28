@@ -20,6 +20,7 @@ use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
+use Fabpot\Amp\Sqlite\SqliteTransactionError;
 
 /** @internal */
 final class Statement implements SqliteStatement
@@ -32,15 +33,18 @@ final class Statement implements SqliteStatement
     private bool $closed = false;
     private int $lastUsedAt;
     private ?SqliteResult $activeResult = null;
+    /** @var \WeakReference<Transaction>|null */
+    private ?\WeakReference $transaction;
 
     public function __construct(
         private readonly Connection $connection,
         private readonly int $statementId,
         private readonly string $query,
-        private ?Transaction $transaction,
+        ?Transaction $transaction,
     ) {
         $this->onClose = new DeferredFuture();
         $this->lastUsedAt = \time();
+        $this->transaction = $transaction !== null ? \WeakReference::create($transaction) : null;
     }
 
     public function __destruct()
@@ -57,11 +61,16 @@ final class Statement implements SqliteStatement
             throw new SqliteException('The SQLite statement is closed');
         }
 
-        $transactionLock = $this->transaction?->acquireOperation();
+        $transaction = $this->transaction?->get();
+        if ($this->transaction !== null && $transaction === null) {
+            throw new SqliteTransactionError('The transaction has been committed or rolled back');
+        }
+
+        $transactionLock = $transaction?->acquireOperation();
 
         try {
             $this->activeResult?->close();
-            $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $this->transaction, $this);
+            $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $transaction, $this);
             if ($this->isClosed()) {
                 $result->close();
 

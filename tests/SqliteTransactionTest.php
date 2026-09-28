@@ -19,6 +19,7 @@ use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteException;
+use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
 use PHPUnit\Framework\TestCase;
@@ -514,6 +515,21 @@ final class SqliteTransactionTest extends TestCase
 
         self::assertSame([['value' => 'outer']], $query->await(new TimeoutCancellation(5)));
         $transaction->commit();
+    }
+
+    public function testAbandonedTransactionWithOpenStatementRollsBackAndReleasesConnection(): void
+    {
+        $statement = (function (): SqliteStatement {
+            $transaction = $this->connection->beginTransaction();
+            $transaction->execute('INSERT INTO entries VALUES (?)', ['abandoned']);
+
+            return $transaction->prepare('SELECT 1');
+        })();
+
+        $query = async(fn () => \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+
+        self::assertSame([], $query->await(new TimeoutCancellation(5)));
+        self::assertTrue($statement->isClosed());
     }
 
     public function testFinishedTransactionsAreGarbageCollectable(): void
