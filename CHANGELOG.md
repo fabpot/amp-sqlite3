@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Fix pooled results losing their last row and holding their connection when read with fetchRow()
+
 ## 1.0.0
 
 - Promote the asynchronous SQLite driver to a stable release

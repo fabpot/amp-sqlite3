@@ -14,12 +14,14 @@ declare(strict_types=1);
 namespace Fabpot\Amp\Sqlite\Test;
 
 use Amp\Sql\SqlTransactionIsolationLevel;
+use Amp\TimeoutCancellation;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnectionPool;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteQueryError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 use function Amp\delay;
@@ -469,6 +471,30 @@ final class SqliteConnectionPoolTest extends TestCase
             $copy->close();
         } finally {
             @\unlink($backupPath);
+        }
+    }
+
+    #[TestWith([1])]
+    #[TestWith([100])]
+    public function testFetchingEveryRowReturnsLastRowAndReleasesConnection(int $batchSize): void
+    {
+        $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize($batchSize), maxConnections: 1);
+
+        try {
+            $result = $pool->query('SELECT 1 AS value UNION ALL SELECT 2 UNION ALL SELECT 3');
+            $values = [];
+            while (($row = $result->fetchRow()) !== null) {
+                $values[] = $row['value'];
+            }
+
+            self::assertSame([1, 2, 3], $values);
+            self::assertNull($result->fetchRow());
+            self::assertSame(
+                ['answer' => 42],
+                async(fn () => $pool->query('SELECT 42 AS answer')->fetchRow())->await(new TimeoutCancellation(5)),
+            );
+        } finally {
+            $pool->close();
         }
     }
 
