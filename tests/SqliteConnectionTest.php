@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
+use Amp\Parallel\Context\ContextException;
 use Amp\Parallel\Context\ContextPanicError;
 use Amp\Sql\SqlConfig;
 use Fabpot\Amp\Sqlite\SqliteConfig;
@@ -299,6 +300,29 @@ final class SqliteConnectionTest extends TestCase
 
         $this->expectException(SqliteConnectionException::class);
         $future->await();
+    }
+
+    public function testStoppedChildProcessClosesConnection(): void
+    {
+        $factory = new RecordingProcessContextFactory();
+        $connection = (new SqliteConnector($factory))->connect(new SqliteConfig(':memory:'));
+        $closed = 0;
+        $connection->onClose(static function () use (&$closed): void {
+            ++$closed;
+        });
+        $factory->context->close();
+
+        try {
+            $connection->query('SELECT 1');
+            self::fail('Expected the stopped child process to fail the connection');
+        } catch (SqliteConnectionException $exception) {
+            self::assertSame('The SQLite child process stopped unexpectedly', $exception->getMessage());
+            self::assertInstanceOf(ContextException::class, $exception->getPrevious());
+        }
+        delay(0);
+
+        self::assertTrue($connection->isClosed());
+        self::assertSame(1, $closed);
     }
 
     public function testMalformedRequestClosesConnection(): void
