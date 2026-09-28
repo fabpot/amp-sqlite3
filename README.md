@@ -164,7 +164,7 @@ while ($user = $result->fetchRow()) {
 }
 ```
 
-Column values are returned as `null`, `int`, `float`, `string`, or `SqliteBlob`. SQLite converts numeric column names to integer array keys.
+Column values are returned as `null`, `int`, `float`, `string`, or `SqliteBlob`. Rows are keyed by column name: when several columns share a name, the last one wins, and numeric names such as `1` become integer keys.
 
 Command results expose useful metadata:
 
