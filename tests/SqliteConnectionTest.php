@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
+use Amp\Parallel\Context\ContextPanicError;
 use Amp\Sql\SqlConfig;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
@@ -234,6 +235,32 @@ final class SqliteConnectionTest extends TestCase
             self::assertSame(['cache_size' => -123], $connection->query('PRAGMA cache_size')->fetchRow());
         } finally {
             $connection->close();
+        }
+    }
+
+    public function testStartupFailureDoesNotExposePragmaValues(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $database = new \SQLite3($path);
+        $database->close();
+        $config = (new SqliteConfig($path))
+            ->withOpenMode(SqliteOpenMode::ReadOnly)
+            ->withPragma('user_version', 'secret-pragma-value');
+
+        try {
+            (new SqliteConnector())->connect($config);
+            self::fail('Expected the read-only pragma write to fail');
+        } catch (SqliteConnectionException $exception) {
+            $childFailure = $exception->getPrevious();
+            while ($childFailure !== null && !$childFailure instanceof ContextPanicError) {
+                $childFailure = $childFailure->getPrevious();
+            }
+
+            self::assertInstanceOf(ContextPanicError::class, $childFailure);
+            self::assertStringContainsString('readonly', $childFailure->getOriginalMessage());
+            self::assertStringNotContainsString('secret-pragma-value', \serialize($childFailure->getOriginalTrace()));
+        } finally {
+            @\unlink($path);
         }
     }
 

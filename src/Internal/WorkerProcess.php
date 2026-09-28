@@ -50,7 +50,7 @@ final class WorkerProcess
     /**
      * @return SqliteOpenConfig
      */
-    public static function validateOpen(mixed $open): array
+    public static function validateOpen(#[\SensitiveParameter] mixed $open): array
     {
         if (!\is_array($open)
             || !\is_string($open['path'] ?? null)
@@ -83,7 +83,7 @@ final class WorkerProcess
         return $open;
     }
 
-    public function __construct(mixed $open)
+    public function __construct(#[\SensitiveParameter] mixed $open)
     {
         $open = self::validateOpen($open);
 
@@ -1020,7 +1020,7 @@ final class WorkerProcess
         return true;
     }
 
-    private function applyPragma(string $name, bool|int|float|string $value): null|bool|int|float|string
+    private function applyPragma(string $name, #[\SensitiveParameter] bool|int|float|string $value): null|bool|int|float|string
     {
         $encoded = match (true) {
             \is_bool($value) => $value ? '1' : '0',
@@ -1028,14 +1028,19 @@ final class WorkerProcess
             default => "'" . $this->database->escapeString($value) . "'",
         };
 
-        /** @var null|bool|int|float|string */
-        return $this->database->querySingle("PRAGMA {$name} = {$encoded}");
+        try {
+            /** @var null|bool|int|float|string */
+            return $this->database->querySingle("PRAGMA {$name} = {$encoded}");
+        } catch (\SQLite3Exception $exception) {
+            // The native frame's SQL argument contains the value, so it must not reach the trace
+            throw new \SQLite3Exception($exception->getMessage(), $exception->getCode());
+        }
     }
 
     /**
      * @param SqliteOpenConfig $open
      */
-    private function applyJournalMode(array $open): void
+    private function applyJournalMode(#[\SensitiveParameter] array $open): void
     {
         if ($open['journal_mode'] !== SqliteJournalMode::Automatic->value) {
             $effective = $open['journal_mode'] === SqliteJournalMode::Wal->value
@@ -1072,7 +1077,7 @@ final class WorkerProcess
     /**
      * @param SqliteOpenConfig $open
      */
-    private function applySynchronousMode(array $open): void
+    private function applySynchronousMode(#[\SensitiveParameter] array $open): void
     {
         if ($open['synchronous_mode'] !== SqliteSynchronousMode::Automatic->value) {
             $this->applyPragma('synchronous', $open['synchronous_mode']);
