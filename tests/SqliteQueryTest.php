@@ -680,6 +680,86 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(1, $this->connection->query('INSERT INTO auxiliary.entries DEFAULT VALUES')->getLastInsertId());
     }
 
+    public function testLastInsertIdFollowsTablesRecreatedWithAnotherStorage(): void
+    {
+        $this->connection->query('CREATE TABLE entries (code TEXT PRIMARY KEY)');
+        self::assertSame(1, $this->connection->query("INSERT INTO entries VALUES ('a')")->getLastInsertId());
+
+        $this->connection->query('DROP TABLE entries');
+        $this->connection->query('CREATE TABLE entries (code TEXT PRIMARY KEY) WITHOUT ROWID');
+        self::assertNull($this->connection->query("INSERT INTO entries VALUES ('b')")->getLastInsertId());
+
+        $this->connection->query('DROP TABLE entries');
+        $this->connection->query('CREATE TABLE entries (code TEXT PRIMARY KEY)');
+        self::assertSame(1, $this->connection->query("INSERT INTO entries VALUES ('c')")->getLastInsertId());
+    }
+
+    public function testLastInsertIdFollowsTableRecreatedByAnotherConnection(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $connection = (new SqliteConnector())->connect(new SqliteConfig($path));
+        $other = (new SqliteConnector())->connect(new SqliteConfig($path));
+
+        try {
+            $connection->query('CREATE TABLE entries (value TEXT PRIMARY KEY)');
+            self::assertSame(1, $connection->query("INSERT INTO entries VALUES ('rowid')")->getLastInsertId());
+
+            $other->executeScript('DROP TABLE entries; CREATE TABLE entries (value TEXT PRIMARY KEY) WITHOUT ROWID;');
+
+            self::assertNull($connection->query("INSERT INTO entries VALUES ('without rowid')")->getLastInsertId());
+        } finally {
+            $connection->close();
+            $other->close();
+            @\unlink($path);
+            @\unlink($path . '-shm');
+            @\unlink($path . '-wal');
+        }
+    }
+
+    #[DataProvider('provideReattachments')]
+    public function testLastInsertIdFollowsReattachedDatabase(string $reattachment): void
+    {
+        $prefix = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8));
+        // Both files have the same schema version, so only the reattachment tells their tables apart
+        foreach (['rowid' => '', 'without_rowid' => ' WITHOUT ROWID'] as $name => $storage) {
+            $database = new \SQLite3("{$prefix}-{$name}.sqlite");
+            $database->exec("CREATE TABLE entries (code TEXT PRIMARY KEY){$storage}");
+            $database->close();
+        }
+
+        try {
+            $this->connection->query("ATTACH DATABASE '{$prefix}-rowid.sqlite' AS auxiliary");
+            $detach = 'DETACH DATABASE auxiliary';
+            $attach = "ATTACH DATABASE '{$prefix}-without_rowid.sqlite' AS auxiliary";
+            $statements = $reattachment === 'prepared' ? [$this->connection->prepare($detach), $this->connection->prepare($attach)] : [];
+
+            self::assertSame(1, $this->connection->query("INSERT INTO auxiliary.entries VALUES ('a')")->getLastInsertId());
+
+            if ($reattachment === 'script') {
+                $this->connection->executeScript("{$detach}; {$attach};");
+            } elseif ($reattachment === 'prepared') {
+                $statements[0]->execute();
+                $statements[1]->execute();
+            } else {
+                $this->connection->query($detach);
+                $this->connection->query($attach);
+            }
+
+            self::assertNull($this->connection->query("INSERT INTO auxiliary.entries VALUES ('b')")->getLastInsertId());
+        } finally {
+            $this->connection->close();
+            @\unlink("{$prefix}-rowid.sqlite");
+            @\unlink("{$prefix}-without_rowid.sqlite");
+        }
+    }
+
+    public static function provideReattachments(): iterable
+    {
+        yield 'queries' => ['query'];
+        yield 'prepared statements' => ['prepared'];
+        yield 'script' => ['script'];
+    }
+
     public function testReportsColumnNames(): void
     {
         $result = $this->connection->query('SELECT 1 AS id, 2 AS value, 3 AS "complex name"');

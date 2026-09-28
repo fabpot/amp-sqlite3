@@ -8,7 +8,7 @@ parameters:
         SqliteRowValue: 'null|int|float|string|\Fabpot\Amp\Sqlite\SqliteBlob'
         SqliteRow: 'array<array-key, SqliteRowValue>'
         SqliteInsertTarget: 'array{database: string, table: string}'
-        SqliteStatementMetadata: 'array{insert: SqliteInsertTarget|null, ambiguous_insert: bool, update: bool, delete: bool}'
+        SqliteStatementMetadata: 'array{insert: SqliteInsertTarget|null, ambiguous_insert: bool, update: bool, delete: bool, attach: bool}'
         SqliteStatementInfo: 'array{metadata: SqliteStatementMetadata, writes: bool, ordinary_insert_target: bool|null}'
         SqliteOpenConfig: 'array{path: string, open_mode: "ReadOnly"|"ReadWrite"|"ReadWriteCreate", journal_mode: string, synchronous_mode: string, foreign_keys: bool, busy_timeout: int, batch_size: positive-int, trusted_schema: bool, extended_result_codes: bool, pragmas: array<string, bool|int|float|string>, functions: array<string, array{callback: string, arg_count: int, deterministic: bool}>, aggregates: array<string, array{step: string, final: string, arg_count: int}>, collations: array<string, string>}'
         SqliteResultPayload: 'array{result_id: int|null, rows: list<SqliteRow>, exhausted: bool, row_count: int|null, column_count: int|null, column_names: list<string>|null, last_insert_id: int|null}'

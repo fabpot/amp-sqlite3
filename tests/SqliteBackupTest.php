@@ -90,6 +90,21 @@ final class SqliteBackupTest extends TestCase
         $this->connection->query('SELECT COUNT(*) FROM replaced');
     }
 
+    public function testLastInsertIdFollowsRestoredTableStorage(): void
+    {
+        // Both databases have the same schema version, so only the restore tells their tables apart
+        $source = new \SQLite3($this->path);
+        $source->exec('CREATE TABLE entries (code TEXT PRIMARY KEY) WITHOUT ROWID');
+        $source->close();
+
+        $this->connection->query('CREATE TABLE entries (code TEXT PRIMARY KEY)');
+        self::assertSame(1, $this->connection->query("INSERT INTO entries VALUES ('a')")->getLastInsertId());
+
+        $this->connection->restore($this->path);
+
+        self::assertNull($this->connection->query("INSERT INTO entries VALUES ('b')")->getLastInsertId());
+    }
+
     public function testBackupRoundTrip(): void
     {
         $this->connection->query('CREATE TABLE entries (value TEXT)');

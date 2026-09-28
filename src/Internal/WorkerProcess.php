@@ -51,6 +51,9 @@ final class WorkerProcess
     /** @var array<string, \SQLite3Stmt> */
     private array $internalStatements = [];
 
+    /** @var array<string, array{schema_version: int, ordinary: bool}> */
+    private array $ordinaryRowIdTables = [];
+
     /** @var array<int, array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: SqliteRow|null}> */
     private array $results = [];
 
@@ -528,6 +531,8 @@ final class WorkerProcess
 
     private function executeScript(string $sql, string $transactionMode): null
     {
+        // Scripts may attach or detach databases
+        $this->ordinaryRowIdTables = [];
         $this->database->exec('BEGIN ' . $transactionMode);
 
         try {
@@ -597,6 +602,9 @@ final class WorkerProcess
         $this->bindParameters($statement, $request);
 
         $nativeResult = $this->executeStatement($statement);
+        if ($this->statementInfo[$statement]['metadata']['attach'] ?? false) {
+            $this->ordinaryRowIdTables = [];
+        }
         $columns = $nativeResult->numColumns();
         $value = [
             'result_id' => null,
@@ -836,6 +844,8 @@ final class WorkerProcess
             $metadata['update'] = true;
         } elseif ($action === \SQLite3::DELETE) {
             $metadata['delete'] = true;
+        } elseif ($action === \SQLite3::ATTACH || $action === \SQLite3::DETACH) {
+            $metadata['attach'] = true;
         }
         $this->capturedMetadata = $metadata;
 
@@ -847,7 +857,7 @@ final class WorkerProcess
      */
     private static function emptyMetadata(): array
     {
-        return ['insert' => null, 'ambiguous_insert' => false, 'update' => false, 'delete' => false];
+        return ['insert' => null, 'ambiguous_insert' => false, 'update' => false, 'delete' => false, 'attach' => false];
     }
 
     private function producesRows(string $sql): bool
@@ -916,7 +926,7 @@ final class WorkerProcess
             return null;
         }
 
-        $ordinary = $info['ordinary_insert_target'] ?? $this->isOrdinaryRowIdTable($target);
+        $ordinary = $info['ordinary_insert_target'] ?? $this->isCachedOrdinaryRowIdTable($target);
         $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $info['writes'], 'ordinary_insert_target' => $ordinary];
         if (!$ordinary) {
             return null;
@@ -930,6 +940,25 @@ final class WorkerProcess
         }
 
         return $after;
+    }
+
+    /**
+     * @param SqliteInsertTarget $target
+     */
+    private function isCachedOrdinaryRowIdTable(array $target): bool
+    {
+        $key = $target['database'] . "\0" . $target['table'];
+        /** @var int $schemaVersion */
+        $schemaVersion = $this->queryInternal('PRAGMA "' . \str_replace('"', '""', $target['database']) . '".schema_version');
+        $cached = $this->ordinaryRowIdTables[$key] ?? null;
+        if ($cached !== null && $cached['schema_version'] === $schemaVersion) {
+            return $cached['ordinary'];
+        }
+
+        $ordinary = $this->isOrdinaryRowIdTable($target);
+        $this->ordinaryRowIdTables[$key] = ['schema_version' => $schemaVersion, 'ordinary' => $ordinary];
+
+        return $ordinary;
     }
 
     /**
