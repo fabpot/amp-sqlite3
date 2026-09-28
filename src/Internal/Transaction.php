@@ -46,7 +46,8 @@ final class Transaction implements SqliteTransaction
 
     private bool $active = true;
     private int $nextSavepointId = 1;
-    private ?Transaction $activeNested = null;
+    /** @var \WeakReference<Transaction>|null */
+    private ?\WeakReference $activeNested = null;
     /** @var DeferredFuture<null>|null */
     private ?DeferredFuture $nestedBusy = null;
 
@@ -134,15 +135,13 @@ final class Transaction implements SqliteTransaction
             if (!$this->isActive()) {
                 throw new SqliteTransactionError('The transaction has been committed or rolled back');
             }
-            if ($this->activeNested !== null && $this->activeNested->isActive()) {
-                throw new SqliteTransactionError('The nested transaction is still active');
-            }
+            $this->assertNoActiveNestedTransaction();
 
             $savepoint = 'amp_sqlite_' . $this->nextSavepointId++;
             $this->connection->executeControl("SAVEPOINT {$savepoint}");
             $this->nestedBusy = new DeferredFuture();
             $transaction = new self($this->connection, $this->mode, $this, $savepoint);
-            $this->activeNested = $transaction;
+            $this->activeNested = \WeakReference::create($transaction);
 
             return $transaction;
         } finally {
@@ -245,7 +244,7 @@ final class Transaction implements SqliteTransaction
                 return;
             }
 
-            $this->activeNested?->close();
+            $this->activeNested?->get()?->close();
             $this->rollbackActive();
         } finally {
             $lock->release();
@@ -264,7 +263,7 @@ final class Transaction implements SqliteTransaction
 
     public function releaseOnConnectionClose(): void
     {
-        $nested = $this->activeNested;
+        $nested = $this->activeNested?->get();
         if ($this->active) {
             $this->active = false;
             $this->closeStatements();
@@ -278,7 +277,7 @@ final class Transaction implements SqliteTransaction
 
     private function releaseNested(self $transaction): void
     {
-        if ($this->activeNested === $transaction) {
+        if ($this->activeNested?->get() === $transaction) {
             $this->activeNested = null;
             $this->nestedBusy?->complete();
             $this->nestedBusy = null;
@@ -351,7 +350,7 @@ final class Transaction implements SqliteTransaction
 
     private function assertNoActiveNestedTransaction(): void
     {
-        if ($this->activeNested !== null && $this->activeNested->isActive()) {
+        if ($this->activeNested?->get()?->isActive()) {
             throw new SqliteTransactionError('The nested transaction is still active');
         }
     }

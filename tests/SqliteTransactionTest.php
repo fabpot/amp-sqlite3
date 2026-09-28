@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace Fabpot\Amp\Sqlite\Test;
 
 use Amp\Sql\SqlTransactionIsolationLevel;
+use Amp\TimeoutCancellation;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnector;
@@ -497,6 +498,22 @@ final class SqliteTransactionTest extends TestCase
         })();
 
         self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testAbandonedNestedTransactionRollsBackAndReleasesParent(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['outer']);
+
+        (function () use ($transaction): void {
+            $nested = $transaction->beginTransaction();
+            $nested->execute('INSERT INTO entries VALUES (?)', ['abandoned']);
+        })();
+
+        $query = async(fn () => \iterator_to_array($transaction->query('SELECT value FROM entries')));
+
+        self::assertSame([['value' => 'outer']], $query->await(new TimeoutCancellation(5)));
+        $transaction->commit();
     }
 
     public function testFinishedTransactionsAreGarbageCollectable(): void
