@@ -134,7 +134,7 @@ $result = $database->execute(
 );
 ```
 
-The remaining examples use `$database` for either a connection or a pool; both provide the same query API. Parameters may use SQLite's anonymous (`?`), numbered (`?NNN`), or named (`:name`, `@name`, and `$name`) forms. Parameter values must be `null`, `bool`, `int`, `float`, `string`, or `SqliteBlob`.
+The remaining examples use `$database` for either a connection or a pool; both provide the same query API. Parameters may use SQLite's anonymous (`?`), numbered (`?NNN`), or named (`:name`, `@name`, and `$name`) forms. Integer keys bind positions starting at `0`, so `?3` uses key `2`. Named keys include their prefix, such as `':name'` or `'@name'`. PHP's SQLite3 extension cannot bind `$name` by name, so bind it by position instead. Parameter values must be `null`, `bool`, `int`, `float`, `string`, or `SqliteBlob`.
 
 Each `query()` or `execute()` call accepts one SQL statement. Use `executeScript()` for parameterless schema or migration scripts:
 
