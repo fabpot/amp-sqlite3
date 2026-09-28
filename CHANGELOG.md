@@ -12,6 +12,7 @@
 - Throw instead of deadlocking when a fiber finishes a transaction while holding its unread results or BLOB streams
 - Keep pragma values out of child-process stack traces when a connection fails to start
 - Fail reads of results and BLOB streams interrupted by a connection close instead of silently ending them
+- Speed up repeated executions of prepared write statements by reusing their metadata until SQLite recompiles them
 
 ## 1.0.0
 

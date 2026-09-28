@@ -539,6 +539,30 @@ final class SqliteQueryTest extends TestCase
         self::assertNull($statement->execute([6, 'value'])->getLastInsertId());
     }
 
+    public function testPreparedInsertRefreshesMetadataAfterAnotherConnectionRecreatesTable(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $connection = (new SqliteConnector())->connect(new SqliteConfig($path));
+        $other = (new SqliteConnector())->connect(new SqliteConfig($path));
+
+        try {
+            $connection->query('CREATE TABLE entries (value TEXT)');
+            $statement = $connection->prepare('INSERT INTO entries (value) VALUES (?)');
+            self::assertSame(1, $statement->execute(['rowid'])->getLastInsertId());
+            self::assertSame(2, $statement->execute(['cached'])->getLastInsertId());
+
+            $other->executeScript('DROP TABLE entries; CREATE TABLE entries (value TEXT PRIMARY KEY) WITHOUT ROWID;');
+
+            self::assertNull($statement->execute(['without rowid'])->getLastInsertId());
+        } finally {
+            $connection->close();
+            $other->close();
+            @\unlink($path);
+            @\unlink($path . '-shm');
+            @\unlink($path . '-wal');
+        }
+    }
+
     public function testPreparedInsertRefreshesMetadataAfterTemporaryTableShadowing(): void
     {
         $this->connection->query('CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT)');
