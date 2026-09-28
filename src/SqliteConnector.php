@@ -25,6 +25,7 @@ use Amp\Sql\SqlConnector;
 use Amp\TimeoutCancellation;
 use Fabpot\Amp\Sqlite\Internal\Connection;
 use Fabpot\Amp\Sqlite\Internal\Path;
+use Fabpot\Amp\Sqlite\Internal\WorkerChannel;
 
 /**
  * @implements SqlConnector<SqliteConfig, SqliteConnection>
@@ -90,7 +91,7 @@ final class SqliteConnector implements SqlConnector
             throw new SqliteConnectionException('Could not start the SQLite child process: ' . self::describeStartupFailure($exception), previous: $exception);
         }
 
-        return new Connection($config, $context);
+        return new Connection($config, new WorkerChannel($context));
     }
 
     /**

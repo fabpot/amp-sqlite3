@@ -16,7 +16,6 @@ namespace Fabpot\Amp\Sqlite\Internal;
 use Amp\DeferredFuture;
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
-use Amp\Parallel\Context\Context;
 use Amp\Sql\SqlTransactionIsolation;
 use Amp\Sync\LocalMutex;
 use Amp\Sync\Lock;
@@ -41,7 +40,6 @@ final class Connection implements SqliteConnection
     use ForbidSerialization;
 
     private readonly LocalMutex $mutex;
-    private readonly LocalMutex $requestMutex;
     /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onClose;
 
@@ -56,11 +54,8 @@ final class Connection implements SqliteConnection
 
     private SqliteTransactionMode $transactionMode;
     private bool $closed = false;
-    private bool $operationActive = false;
     private int $activeConnectionLocks = 0;
     private int $activeLeases = 0;
-    private int $lastUsedAt;
-    private int $nextRequestId = 1;
     /** @var \WeakReference<Transaction>|null */
     private ?\WeakReference $activeTransaction = null;
     private ?Lock $transactionLock = null;
@@ -72,15 +67,11 @@ final class Connection implements SqliteConnection
     /** @var DeferredFuture<null>|null */
     private ?DeferredFuture $transactionIdle = null;
 
-    /**
-     * @param Context<null, mixed, array<string, mixed>> $context
-     */
     public function __construct(
         private readonly SqliteConfig $config,
-        private readonly Context $context,
+        private readonly WorkerChannel $channel,
     ) {
         $this->mutex = new LocalMutex();
-        $this->requestMutex = new LocalMutex();
         $this->onClose = new DeferredFuture();
         /** @var \WeakMap<Result, true> $results */
         $results = new \WeakMap();
@@ -96,7 +87,6 @@ final class Connection implements SqliteConnection
         $this->transactionLeaseOwners = $transactionLeaseOwners;
         $this->task = new FiberLocal(static fn (): \stdClass => new \stdClass());
         $this->transactionMode = $config->getTransactionMode();
-        $this->lastUsedAt = \time();
     }
 
     public function __destruct()
@@ -173,7 +163,7 @@ final class Connection implements SqliteConnection
 
     public function getLastUsedAt(): int
     {
-        return $this->lastUsedAt;
+        return $this->channel->getLastUsedAt();
     }
 
     public function close(): void
@@ -184,7 +174,7 @@ final class Connection implements SqliteConnection
 
         $this->closed = true;
 
-        if ($this->operationActive || $this->activeConnectionLocks > 0 || $this->activeLeases > 0 || $this->transactionLock !== null) {
+        if ($this->channel->isBusy() || $this->activeConnectionLocks > 0 || $this->activeLeases > 0 || $this->transactionLock !== null) {
             $this->forceClose();
 
             return;
@@ -192,24 +182,16 @@ final class Connection implements SqliteConnection
 
         $this->closeDependents();
         $lock = $this->mutex->acquire();
-        $requestLock = $this->requestMutex->acquire();
         try {
-            if (!$this->context->isClosed()) {
-                $id = $this->nextRequestId++;
-                $this->context->send(['id' => $id, 'operation' => 'close']);
-                $this->context->receive();
-                $this->context->join();
-            }
-        } catch (\Throwable) {
+            $this->channel->close();
+        } catch (WorkerFailure) {
             $this->forceClose();
 
             return;
         } finally {
-            $requestLock->release();
             $lock->release();
         }
 
-        $this->context->close();
         $this->onClose->complete();
     }
 
@@ -325,7 +307,7 @@ final class Connection implements SqliteConnection
 
     public function closeStatement(int $statementId, string $sql): void
     {
-        if ($this->closed || $this->context->isClosed()) {
+        if ($this->closed || $this->channel->isClosed()) {
             return;
         }
 
@@ -413,7 +395,7 @@ final class Connection implements SqliteConnection
             },
             function () use ($blobId, $release): void {
                 try {
-                    if (!$this->closed && !$this->context->isClosed()) {
+                    if (!$this->closed && !$this->channel->isClosed()) {
                         $this->requestVoid('closeBlob', '', ['blob_id' => $blobId]);
                     }
                 } catch (SqliteConnectionException) {
@@ -546,7 +528,7 @@ final class Connection implements SqliteConnection
 
     private function closeResult(int $resultId, string $sql): null
     {
-        if ($this->closed || $this->context->isClosed()) {
+        if ($this->closed || $this->channel->isClosed()) {
             return null;
         }
 
@@ -565,7 +547,7 @@ final class Connection implements SqliteConnection
     private function requestVoid(string $operation, string $sql, #[\SensitiveParameter] array $data): void
     {
         try {
-            WorkerResponse::void($this->exchange($operation, $sql, $data));
+            WorkerResponse::void($this->channel->request($operation, $sql, $data));
         } catch (WorkerFailure $failure) {
             $this->fail($failure);
         }
@@ -579,7 +561,7 @@ final class Connection implements SqliteConnection
     private function requestResultPayload(string $operation, string $sql, #[\SensitiveParameter] array $data): array
     {
         try {
-            return WorkerResponse::result($this->exchange($operation, $sql, $data));
+            return WorkerResponse::result($this->channel->request($operation, $sql, $data));
         } catch (WorkerFailure $failure) {
             $this->fail($failure);
         }
@@ -593,7 +575,7 @@ final class Connection implements SqliteConnection
     private function requestBatchPayload(string $operation, string $sql, array $data): array
     {
         try {
-            return WorkerResponse::batch($this->exchange($operation, $sql, $data));
+            return WorkerResponse::batch($this->channel->request($operation, $sql, $data));
         } catch (WorkerFailure $failure) {
             $this->fail($failure);
         }
@@ -607,7 +589,7 @@ final class Connection implements SqliteConnection
     private function requestOpenBlobPayload(string $operation, string $sql, array $data): array
     {
         try {
-            return WorkerResponse::openBlob($this->exchange($operation, $sql, $data));
+            return WorkerResponse::openBlob($this->channel->request($operation, $sql, $data));
         } catch (WorkerFailure $failure) {
             $this->fail($failure);
         }
@@ -619,7 +601,7 @@ final class Connection implements SqliteConnection
     private function requestStatementId(string $operation, string $sql, array $data): int
     {
         try {
-            return WorkerResponse::statementId($this->exchange($operation, $sql, $data));
+            return WorkerResponse::statementId($this->channel->request($operation, $sql, $data));
         } catch (WorkerFailure $failure) {
             $this->fail($failure);
         }
@@ -631,36 +613,10 @@ final class Connection implements SqliteConnection
     private function requestBlobBytes(string $operation, string $sql, array $data): string
     {
         try {
-            return WorkerResponse::blobBytes($this->exchange($operation, $sql, $data));
+            return WorkerResponse::blobBytes($this->channel->request($operation, $sql, $data));
         } catch (WorkerFailure $failure) {
             $this->fail($failure);
         }
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     *
-     * @throws WorkerFailure
-     */
-    private function exchange(string $operation, string $sql, #[\SensitiveParameter] array $data): mixed
-    {
-        $lock = $this->requestMutex->acquire();
-        $id = $this->nextRequestId++;
-        $this->operationActive = true;
-
-        try {
-            $this->context->send(['id' => $id, 'operation' => $operation, ...$data]);
-            $response = $this->context->receive();
-        } catch (\Throwable $exception) {
-            throw new WorkerFailure('The SQLite child process stopped unexpectedly', previous: $exception);
-        } finally {
-            $this->operationActive = false;
-            $lock->release();
-        }
-
-        $this->lastUsedAt = \time();
-
-        return WorkerResponse::unwrap($response, $id, $sql);
     }
 
     private function fail(WorkerFailure $failure): never
@@ -742,13 +698,7 @@ final class Connection implements SqliteConnection
         $this->transactionIdle = null;
         $this->activeLeases = 0;
 
-        if (!$this->context->isClosed()) {
-            $this->context->close();
-            try {
-                $this->context->join();
-            } catch (\Throwable) {
-            }
-        }
+        $this->channel->kill();
 
         if (!$this->onClose->isComplete()) {
             $this->onClose->complete();
