@@ -947,13 +947,13 @@ final class Connection implements SqliteConnection
     {
         foreach ($this->results as $result => $_) {
             try {
-                $result->close();
+                $result->closeOnConnectionClose();
             } catch (\Throwable) {
             }
         }
         foreach ($this->blobs as $blob => $_) {
             try {
-                $blob->close();
+                $blob->closeOnConnectionClose();
             } catch (\Throwable) {
             }
         }

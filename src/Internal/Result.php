@@ -18,6 +18,7 @@ use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
 use Amp\Sync\Lock;
 use Fabpot\Amp\Sqlite\SqliteBlob;
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 
@@ -35,6 +36,7 @@ final class Result implements SqliteResult, \IteratorAggregate
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
     private bool $explicitlyClosed = false;
+    private bool $connectionClosed = false;
     private bool $exhausted;
     private ?Transaction $transaction;
 
@@ -76,6 +78,9 @@ final class Result implements SqliteResult, \IteratorAggregate
     public function fetchRow(): ?array
     {
         if ($this->closed || $this->explicitlyClosed) {
+            if ($this->connectionClosed) {
+                throw new SqliteConnectionException('The SQLite connection is closed');
+            }
             if (!$this->explicitlyClosed && $this->exhausted) {
                 return null;
             }
@@ -103,10 +108,14 @@ final class Result implements SqliteResult, \IteratorAggregate
 
     public function getIterator(): \Traversable
     {
-        // Iteration must end silently on a closed result: SqlPooledResult drains the
-        // inner iterator after an explicit close() to release the pooled connection.
+        // Iteration must end silently on an explicitly closed result: SqlPooledResult drains
+        // the inner iterator after close() to release the pooled connection.
         while (!$this->closed && !$this->explicitlyClosed && ($row = $this->fetchRow()) !== null) {
             yield $row;
+        }
+
+        if ($this->connectionClosed) {
+            throw new SqliteConnectionException('The SQLite connection is closed');
         }
     }
 
@@ -150,6 +159,16 @@ final class Result implements SqliteResult, \IteratorAggregate
         } finally {
             $this->finish();
         }
+    }
+
+    public function closeOnConnectionClose(): void
+    {
+        if ($this->closed) {
+            return;
+        }
+
+        $this->connectionClosed = true;
+        $this->close();
     }
 
     public function isClosed(): bool

@@ -498,6 +498,25 @@ final class SqliteConnectionPoolTest extends TestCase
         }
     }
 
+    public function testPooledFetchAfterPoolCloseFailsAndResultCanStillBeClosed(): void
+    {
+        $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize(1));
+        $result = $pool->query('SELECT 1 AS value UNION ALL SELECT 2 UNION ALL SELECT 3');
+        $result->fetchRow();
+        $pool->close();
+        delay(0.05);
+
+        try {
+            $result->fetchRow();
+            self::fail('Expected fetching from a result of a closed pool to fail');
+        } catch (SqliteConnectionException $exception) {
+            self::assertSame('The SQLite connection is closed', $exception->getMessage());
+        }
+
+        $result->close();
+        self::assertTrue($result->isClosed());
+    }
+
     public function testPooledFetchAfterExplicitResultCloseFails(): void
     {
         $result = $this->pool->query('SELECT 1');

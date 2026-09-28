@@ -23,6 +23,7 @@ use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteBlobStream;
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
 
 /**
  * @internal
@@ -40,6 +41,7 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
     /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
+    private bool $connectionClosed = false;
     private bool $readPending = false;
     private int $position = 0;
     private ?Transaction $transaction;
@@ -74,6 +76,10 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
         }
 
         if ($this->closed) {
+            if ($this->connectionClosed) {
+                throw new SqliteConnectionException('The SQLite connection is closed');
+            }
+
             return null;
         }
 
@@ -172,6 +178,16 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
             }
             $this->onClose->complete();
         }
+    }
+
+    public function closeOnConnectionClose(): void
+    {
+        if ($this->closed) {
+            return;
+        }
+
+        $this->connectionClosed = true;
+        $this->close();
     }
 
     public function isClosed(): bool

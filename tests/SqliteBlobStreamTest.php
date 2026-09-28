@@ -245,6 +245,18 @@ final class SqliteBlobStreamTest extends TestCase
         $future->await();
     }
 
+    public function testReadAfterConnectionCloseFailsInsteadOfEndingStream(): void
+    {
+        $this->connection->query('INSERT INTO files VALUES (zeroblob(16384))');
+        $blob = $this->connection->openBlob('files', 'contents', 1);
+        $blob->read();
+
+        $this->connection->close();
+
+        $this->expectException(SqliteConnectionException::class);
+        $blob->read();
+    }
+
     public function testCloseIsIdempotent(): void
     {
         $this->connection->query('INSERT INTO files VALUES (zeroblob(1))');

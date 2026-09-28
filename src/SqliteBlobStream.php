@@ -23,7 +23,7 @@ interface SqliteBlobStream extends ReadableStream, WritableStream
      * @throws \Amp\ByteStream\PendingReadError If another read is already pending.
      * @throws \Amp\ByteStream\StreamException If the stream cannot be read.
      * @throws \Amp\CancelledException If the read is cancelled.
-     * @throws SqliteConnectionException If the connection is lost while reading.
+     * @throws SqliteConnectionException If the connection is closed or lost before the BLOB is fully read.
      * @throws SqliteException If SQLite cannot read the BLOB.
      */
     public function read(?Cancellation $cancellation = null): ?string;

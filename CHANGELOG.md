@@ -11,6 +11,7 @@
 - Make beginTransaction() wait for the active transaction to finish instead of throwing, like other connection operations
 - Throw instead of deadlocking when a fiber finishes a transaction while holding its unread results or BLOB streams
 - Keep pragma values out of child-process stack traces when a connection fails to start
+- Fail reads of results and BLOB streams interrupted by a connection close instead of silently ending them
 
 ## 1.0.0
 

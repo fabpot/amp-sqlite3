@@ -16,6 +16,7 @@ namespace Fabpot\Amp\Sqlite\Internal;
 use Amp\Sql\Common\SqlPooledResult;
 use Amp\Sql\SqlResult;
 use Fabpot\Amp\Sqlite\SqliteBlob;
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 
 /**
@@ -63,7 +64,12 @@ final class PooledResult extends SqlPooledResult implements SqliteResult
     public function close(): void
     {
         $this->result->close();
-        while (parent::fetchRow() !== null) {
+
+        try {
+            while (parent::fetchRow() !== null) {
+            }
+        } catch (SqliteConnectionException) {
+            // Closing a result of a closed connection is a no-op
         }
     }
 

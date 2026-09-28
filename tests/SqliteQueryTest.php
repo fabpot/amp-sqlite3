@@ -278,6 +278,28 @@ final class SqliteQueryTest extends TestCase
         self::assertTrue($result->isClosed());
     }
 
+    public function testFetchRowAfterConnectionCloseFailsInsteadOfEndingResult(): void
+    {
+        $result = $this->connection->query('SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3');
+        $result->fetchRow();
+
+        $this->connection->close();
+
+        $this->expectException(SqliteConnectionException::class);
+        $result->fetchRow();
+    }
+
+    public function testIterationAfterConnectionCloseFailsInsteadOfEndingResult(): void
+    {
+        $result = $this->connection->query('SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3');
+
+        $this->expectException(SqliteConnectionException::class);
+
+        foreach ($result as $_) {
+            $this->connection->close();
+        }
+    }
+
     public function testConnectionCloseInvalidatesResultAndReleasesWaitingOperation(): void
     {
         $result = $this->connection->query('SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3');
