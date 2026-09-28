@@ -18,17 +18,19 @@ final class SqlStatementBoundary
 {
     public static function hasSecondStatement(string $remainder): bool
     {
-        do {
-            $previous = $remainder;
-            $remainder = \ltrim($remainder);
-            $remainder = (string) \preg_replace(
-                '/\A(?:--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))/s',
-                '',
-                $remainder,
-                1,
-            );
-        } while ($remainder !== $previous);
+        return self::skipInsignificant($remainder) !== '';
+    }
 
-        return $remainder !== '';
+    public static function startsWithKeyword(string $sql, string ...$keywords): bool
+    {
+        return (bool) \preg_match('/\A(?:' . \implode('|', $keywords) . ')\b/i', self::skipInsignificant($sql));
+    }
+
+    /**
+     * Strips leading whitespace, comments, and empty statements.
+     */
+    public static function skipInsignificant(string $sql): string
+    {
+        return (string) \preg_replace('/\A(?:[ \t\n\f\r;]+|--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))*/s', '', $sql, 1);
     }
 }

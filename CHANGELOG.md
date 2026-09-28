@@ -6,6 +6,7 @@
 - Roll back abandoned nested transactions instead of blocking their parent transaction
 - Roll back abandoned transactions even while their prepared statements are still referenced
 - Apply additional pragmas before enabling WAL so settings such as page_size take effect on new databases
+- Ignore empty SQL statements so they no longer break scripts or hide transaction control from executeScript()
 
 ## 1.0.0
 

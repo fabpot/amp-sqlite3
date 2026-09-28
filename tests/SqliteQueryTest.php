@@ -128,6 +128,25 @@ final class SqliteQueryTest extends TestCase
         $this->connection->executeScript('BEGIN; SELECT 1; COMMIT;');
     }
 
+    public function testIgnoresEmptyStatements(): void
+    {
+        $this->connection->executeScript("; CREATE TABLE events (name TEXT NOT NULL);; INSERT INTO events VALUES ('created');;");
+
+        self::assertSame(['name' => 'created'], $this->connection->query('; SELECT name FROM events;;')->fetchRow());
+    }
+
+    public function testScriptCannotHideTransactionControlBehindEmptyStatement(): void
+    {
+        try {
+            $this->connection->executeScript("CREATE TABLE events (name TEXT); ;COMMIT; INSERT INTO events VALUES ('committed')");
+            self::fail('Expected the transaction-control statement to be rejected');
+        } catch (SqliteQueryError $error) {
+            self::assertSame('SQL scripts cannot contain transaction-control statements', $error->getMessage());
+        }
+
+        self::assertNull($this->connection->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'")->fetchRow());
+    }
+
     public function testAllowsUnterminatedTrailingBlockComment(): void
     {
         self::assertSame([1 => 1], $this->connection->query('SELECT 1; /* trailing')->fetchRow());
@@ -503,6 +522,16 @@ final class SqliteQueryTest extends TestCase
         self::assertSame([['value' => 'main']], \iterator_to_array($this->connection->query('SELECT value FROM main.entries')));
     }
 
+    public function testRejectsRowProducingDmlAfterEmptyStatement(): void
+    {
+        $this->connection->query('CREATE TABLE entries (id INTEGER PRIMARY KEY)');
+
+        $this->expectException(SqliteQueryError::class);
+        $this->expectExceptionMessage('Row-producing DML statements are not supported by the PHP SQLite3 extension');
+
+        $this->connection->query('; INSERT INTO entries DEFAULT VALUES RETURNING id');
+    }
+
     public function testPreparedDmlBecomingRowProducingIsRejectedBeforeExecution(): void
     {
         $this->connection->query('CREATE TABLE entries (value TEXT)');
@@ -528,6 +557,7 @@ final class SqliteQueryTest extends TestCase
 
         self::assertNotNull($this->connection->query("EXPLAIN UPDATE entries SET value = 'updated'")->fetchRow());
         self::assertNotNull($this->connection->query("EXPLAIN QUERY PLAN DELETE FROM entries WHERE value = 'deleted'")->fetchRow());
+        self::assertNotNull($this->connection->query("; EXPLAIN DELETE FROM entries WHERE value = 'deleted'")->fetchRow());
         self::assertSame(0, $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
     }
 

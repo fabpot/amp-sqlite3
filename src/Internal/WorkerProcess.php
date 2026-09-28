@@ -517,7 +517,7 @@ final class WorkerProcess
                 }
                 try {
                     $statementSql = $statement->getSQL();
-                    if (\preg_match('/\A(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/is', $statementSql)) {
+                    if (SqlStatementBoundary::startsWithKeyword($statementSql, 'BEGIN', 'COMMIT', 'END', 'ROLLBACK', 'SAVEPOINT', 'RELEASE')) {
                         throw new \RuntimeException('SQL scripts cannot contain transaction-control statements');
                     }
                     $result = $statement->execute();
@@ -788,7 +788,7 @@ final class WorkerProcess
 
     private function refreshStatementMetadata(\SQLite3Stmt $statement): void
     {
-        if ($statement->readOnly() || self::isExplainStatement($statement->getSQL())) {
+        if ($statement->readOnly() || SqlStatementBoundary::startsWithKeyword($statement->getSQL(), 'EXPLAIN')) {
             return;
         }
 
@@ -800,17 +800,12 @@ final class WorkerProcess
         $this->statementMetadata[$statement] = $metadata;
     }
 
-    private static function isExplainStatement(string $sql): bool
-    {
-        return (bool) \preg_match('/\A(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*.*?(?:\*\/|\z))*EXPLAIN\b/is', $sql);
-    }
-
     /**
      * @return array{SqliteStatementMetadata, bool}
      */
     private function analyzeStatement(string $sql): array
     {
-        $statement = $this->prepareWithMetadata('EXPLAIN ' . $sql, $metadata);
+        $statement = $this->prepareWithMetadata('EXPLAIN ' . SqlStatementBoundary::skipInsignificant($sql), $metadata);
         if (!$statement) {
             return [$metadata, false];
         }
