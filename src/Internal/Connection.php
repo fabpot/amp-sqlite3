@@ -27,7 +27,6 @@ use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteException;
-use Fabpot\Amp\Sqlite\SqliteQueryError;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
@@ -436,12 +435,12 @@ final class Connection implements SqliteConnection
         $lock = $this->acquire($transaction !== null);
 
         try {
-            $value = $this->requestStatementPayload('prepare', $sql, ['sql' => $sql]);
+            $statementId = $this->requestStatementId('prepare', $sql, ['sql' => $sql]);
         } finally {
             $this->releaseAcquired($lock, $transaction !== null);
         }
 
-        $statement = new Statement($this, $value['statement_id'], $sql, $transaction);
+        $statement = new Statement($this, $statementId, $sql, $transaction);
         $this->statements[$statement] = true;
 
         return $statement;
@@ -565,8 +564,10 @@ final class Connection implements SqliteConnection
      */
     private function requestVoid(string $operation, string $sql, #[\SensitiveParameter] array $data): void
     {
-        if ($this->request($operation, $sql, $data) !== null) {
-            $this->invalidResponse();
+        try {
+            WorkerResponse::void($this->exchange($operation, $sql, $data));
+        } catch (WorkerFailure $failure) {
+            $this->fail($failure);
         }
     }
 
@@ -577,49 +578,11 @@ final class Connection implements SqliteConnection
      */
     private function requestResultPayload(string $operation, string $sql, #[\SensitiveParameter] array $data): array
     {
-        $value = $this->request($operation, $sql, $data);
-        if (!\is_array($value)
-            || \count($value) !== 7
-            || !\array_key_exists('result_id', $value)
-            || ($value['result_id'] !== null && !\is_int($value['result_id']))
-            || !self::isRowList($value['rows'] ?? null)
-            || !\is_bool($value['exhausted'] ?? null)
-            || !\array_key_exists('row_count', $value)
-            || ($value['row_count'] !== null && !\is_int($value['row_count']))
-            || !\array_key_exists('column_count', $value)
-            || ($value['column_count'] !== null && !\is_int($value['column_count']))
-            || !\array_key_exists('column_names', $value)
-            || !self::isStringListOrNull($value['column_names'])
-            || !\array_key_exists('last_insert_id', $value)
-            || ($value['last_insert_id'] !== null && !\is_int($value['last_insert_id']))
-        ) {
-            $this->invalidResponse();
+        try {
+            return WorkerResponse::result($this->exchange($operation, $sql, $data));
+        } catch (WorkerFailure $failure) {
+            $this->fail($failure);
         }
-
-        /** @var list<string>|null $columnNames */
-        $columnNames = $value['column_names'];
-        if ($value['result_id'] === null) {
-            if ($value['rows'] !== []
-                || !$value['exhausted']
-                || $value['row_count'] === null
-                || $value['row_count'] < 0
-                || $value['column_count'] !== null
-                || $columnNames !== null
-            ) {
-                $this->invalidResponse();
-            }
-        } elseif ($value['result_id'] < 1
-            || $value['row_count'] !== null
-            || $value['column_count'] === null
-            || $value['column_count'] < 1
-            || $columnNames === null
-            || \count($columnNames) !== $value['column_count']
-        ) {
-            $this->invalidResponse();
-        }
-
-        /** @var SqliteResultPayload $value */
-        return $value;
     }
 
     /**
@@ -629,17 +592,11 @@ final class Connection implements SqliteConnection
      */
     private function requestBatchPayload(string $operation, string $sql, array $data): array
     {
-        $value = $this->request($operation, $sql, $data);
-        if (!\is_array($value) || \count($value) !== 2 || !self::isRowList($value['rows'] ?? null) || !\is_bool($value['exhausted'] ?? null)) {
-            $this->invalidResponse();
+        try {
+            return WorkerResponse::batch($this->exchange($operation, $sql, $data));
+        } catch (WorkerFailure $failure) {
+            $this->fail($failure);
         }
-
-        /** @var SqliteBatchPayload $value */
-        if (!$value['exhausted'] && $value['rows'] === []) {
-            $this->invalidResponse();
-        }
-
-        return $value;
     }
 
     /**
@@ -649,29 +606,23 @@ final class Connection implements SqliteConnection
      */
     private function requestOpenBlobPayload(string $operation, string $sql, array $data): array
     {
-        $value = $this->request($operation, $sql, $data);
-        if (!\is_array($value) || \count($value) !== 2 || !\is_int($value['blob_id'] ?? null) || $value['blob_id'] < 1 || !\is_int($value['length'] ?? null) || $value['length'] < 0) {
-            $this->invalidResponse();
+        try {
+            return WorkerResponse::openBlob($this->exchange($operation, $sql, $data));
+        } catch (WorkerFailure $failure) {
+            $this->fail($failure);
         }
-
-        /** @var array{blob_id: int, length: int} $value */
-        return $value;
     }
 
     /**
      * @param array<string, mixed> $data
-     *
-     * @return array{statement_id: int}
      */
-    private function requestStatementPayload(string $operation, string $sql, array $data): array
+    private function requestStatementId(string $operation, string $sql, array $data): int
     {
-        $value = $this->request($operation, $sql, $data);
-        if (!\is_array($value) || \count($value) !== 1 || !\is_int($value['statement_id'] ?? null) || $value['statement_id'] < 1) {
-            $this->invalidResponse();
+        try {
+            return WorkerResponse::statementId($this->exchange($operation, $sql, $data));
+        } catch (WorkerFailure $failure) {
+            $this->fail($failure);
         }
-
-        /** @var array{statement_id: int} $value */
-        return $value;
     }
 
     /**
@@ -679,61 +630,19 @@ final class Connection implements SqliteConnection
      */
     private function requestBlobBytes(string $operation, string $sql, array $data): string
     {
-        $value = $this->request($operation, $sql, $data);
-        if (!\is_array($value) || \count($value) !== 1 || !\is_string($value['bytes'] ?? null)) {
-            $this->invalidResponse();
+        try {
+            return WorkerResponse::blobBytes($this->exchange($operation, $sql, $data));
+        } catch (WorkerFailure $failure) {
+            $this->fail($failure);
         }
-
-        /** @var array{bytes: string} $value */
-        return $value['bytes'];
-    }
-
-    private static function isRowList(mixed $value): bool
-    {
-        if (!\is_array($value) || !\array_is_list($value)) {
-            return false;
-        }
-
-        foreach ($value as $row) {
-            if (!\is_array($row) || !\array_all($row, self::isRowValue(...))) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static function isRowValue(mixed $value): bool
-    {
-        return $value === null
-            || \is_int($value)
-            || \is_float($value)
-            || \is_string($value)
-            || $value instanceof SqliteBlob;
-    }
-
-    private static function isStringListOrNull(mixed $value): bool
-    {
-        if ($value === null) {
-            return true;
-        }
-        if (!\is_array($value) || !\array_is_list($value)) {
-            return false;
-        }
-
-        foreach ($value as $item) {
-            if (!\is_string($item)) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /**
      * @param array<string, mixed> $data
+     *
+     * @throws WorkerFailure
      */
-    private function request(string $operation, string $sql, #[\SensitiveParameter] array $data): mixed
+    private function exchange(string $operation, string $sql, #[\SensitiveParameter] array $data): mixed
     {
         $lock = $this->requestMutex->acquire();
         $id = $this->nextRequestId++;
@@ -743,120 +652,23 @@ final class Connection implements SqliteConnection
             $this->context->send(['id' => $id, 'operation' => $operation, ...$data]);
             $response = $this->context->receive();
         } catch (\Throwable $exception) {
-            $this->closed = true;
-            $this->forceClose();
-
-            throw new SqliteConnectionException('The SQLite child process stopped unexpectedly', previous: $exception);
+            throw new WorkerFailure('The SQLite child process stopped unexpectedly', previous: $exception);
         } finally {
             $this->operationActive = false;
             $lock->release();
         }
 
         $this->lastUsedAt = \time();
-        $response = $this->validateResponse($response, $id, $sql);
 
-        return $response['value'];
+        return WorkerResponse::unwrap($response, $id, $sql);
     }
 
-    /**
-     * @return array{id: int, value: mixed}
-     */
-    private function validateResponse(mixed $response, int $id, string $sql): array
-    {
-        if (!\is_array($response) || \count($response) !== 2 || ($response['id'] ?? null) !== $id) {
-            $this->invalidResponse();
-        }
-
-        if (\array_key_exists('protocol_error', $response)) {
-            $error = $this->validateProtocolError($response['protocol_error']);
-            $this->closed = true;
-            $this->forceClose();
-
-            throw new SqliteConnectionException($error['message']);
-        }
-
-        if (\array_key_exists('query_error', $response)) {
-            $error = $this->validateQueryError($response['query_error']);
-
-            throw new SqliteQueryError(
-                $error['message'],
-                $sql,
-                $error['code'],
-                $error['extended_code'],
-            );
-        }
-
-        if (\array_key_exists('operation_error', $response)) {
-            $error = $this->validateOperationError($response['operation_error']);
-
-            throw new SqliteException($error['message'], $error['code'] ?? 0);
-        }
-
-        if (!\array_key_exists('value', $response)) {
-            $this->invalidResponse();
-        }
-
-        /** @var array{id: int, value: mixed} */
-        return $response;
-    }
-
-    /**
-     * @return array{message: string}
-     */
-    private function validateProtocolError(mixed $error): array
-    {
-        if (!\is_array($error) || \count($error) !== 1 || !\is_string($error['message'] ?? null)) {
-            $this->invalidResponse();
-        }
-
-        /** @var array{message: string} $error */
-        return $error;
-    }
-
-    /**
-     * @return array{message: string, code: int|null, extended_code: int|null}
-     */
-    private function validateQueryError(mixed $error): array
-    {
-        if (!\is_array($error)
-            || \count($error) !== 3
-            || !\is_string($error['message'] ?? null)
-            || !\array_key_exists('code', $error)
-            || ($error['code'] !== null && !\is_int($error['code']))
-            || !\array_key_exists('extended_code', $error)
-            || ($error['extended_code'] !== null && !\is_int($error['extended_code']))
-        ) {
-            $this->invalidResponse();
-        }
-
-        /** @var array{message: string, code: int|null, extended_code: int|null} $error */
-        return $error;
-    }
-
-    /**
-     * @return array{message: string, code: int|null}
-     */
-    private function validateOperationError(mixed $error): array
-    {
-        if (!\is_array($error)
-            || \count($error) !== 2
-            || !\is_string($error['message'] ?? null)
-            || !\array_key_exists('code', $error)
-            || ($error['code'] !== null && !\is_int($error['code']))
-        ) {
-            $this->invalidResponse();
-        }
-
-        /** @var array{message: string, code: int|null} $error */
-        return $error;
-    }
-
-    private function invalidResponse(): never
+    private function fail(WorkerFailure $failure): never
     {
         $this->closed = true;
         $this->forceClose();
 
-        throw new SqliteConnectionException('Received an invalid response from the SQLite child process');
+        throw new SqliteConnectionException($failure->getMessage(), previous: $failure->getPrevious());
     }
 
     private function awaitTransactionResource(): void
