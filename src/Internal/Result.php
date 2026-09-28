@@ -38,6 +38,7 @@ final class Result implements SqliteResult, \IteratorAggregate
     private bool $explicitlyClosed = false;
     private bool $connectionClosed = false;
     private bool $exhausted;
+    private int $position = 0;
     private ?Transaction $transaction;
 
     /**
@@ -86,18 +87,18 @@ final class Result implements SqliteResult, \IteratorAggregate
             throw new SqliteException('The SQLite result is closed');
         }
 
-        if ($this->rows === []) {
+        if (!isset($this->rows[$this->position])) {
             $this->fetchNextBatch();
         }
 
-        $row = \array_shift($this->rows);
+        $row = $this->rows[$this->position++] ?? null;
         if ($row === null) {
             $this->finish();
 
             return null;
         }
 
-        if ($this->rows === [] && $this->exhausted) {
+        if (!isset($this->rows[$this->position]) && $this->exhausted) {
             $this->finish();
         }
 
@@ -197,6 +198,7 @@ final class Result implements SqliteResult, \IteratorAggregate
         }
 
         $this->rows = $batch['rows'];
+        $this->position = 0;
         $this->exhausted = $batch['exhausted'];
         if ($this->exhausted && $this->rows === []) {
             $this->finish();
@@ -211,6 +213,7 @@ final class Result implements SqliteResult, \IteratorAggregate
 
         $this->closed = true;
         $this->rows = [];
+        $this->position = 0;
         $this->lease?->release();
         if ($this->transaction !== null) {
             $this->transaction = null;
