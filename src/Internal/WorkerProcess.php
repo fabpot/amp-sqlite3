@@ -938,7 +938,8 @@ final class WorkerProcess
     private function isOrdinaryRowIdTable(array $target): bool
     {
         $database = '"' . \str_replace('"', '""', $target['database']) . '"';
-        $statement = $this->database->prepare("SELECT type, sql FROM {$database}.sqlite_schema WHERE name = :name");
+        // sqlite_schema only exists since SQLite 3.33
+        $statement = $this->database->prepare("SELECT type, sql FROM {$database}.sqlite_master WHERE name = :name");
         if (!$statement) {
             return false;
         }
