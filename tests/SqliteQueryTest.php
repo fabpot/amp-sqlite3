@@ -606,6 +606,25 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(0, $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
     }
 
+    public function testDirectDmlBecomingRowProducingIsRejectedBeforeExecution(): void
+    {
+        $this->connection->query('CREATE TABLE entries (value TEXT)');
+        $this->connection->query("INSERT INTO entries VALUES ('once')");
+        $this->connection->query('PRAGMA count_changes = ON')->close();
+
+        try {
+            $this->connection->query("INSERT INTO entries VALUES ('once')");
+            self::fail('Expected row-producing DML to be rejected');
+        } catch (SqliteQueryError $error) {
+            self::assertSame(
+                'Row-producing DML statements are not supported by the PHP SQLite3 extension',
+                $error->getMessage(),
+            );
+        }
+
+        self::assertSame(1, $this->connection->query('SELECT COUNT(*) AS count FROM entries')->fetchRow()['count']);
+    }
+
     public function testExplainOfDmlRemainsReadOnly(): void
     {
         $this->connection->query('CREATE TABLE entries (value TEXT)');

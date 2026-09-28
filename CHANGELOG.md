@@ -16,6 +16,7 @@
 - Fix INSERT statements failing on SQLite versions older than 3.33, which lack the sqlite_schema table
 - Read result rows in constant time so larger batch sizes no longer slow down iteration
 - Speed up direct INSERT queries by caching whether each target table has rowids until its schema changes
+- Speed up direct INSERT, UPDATE, and DELETE queries by caching whether their SQL produces rows
 
 ## 1.0.0
 

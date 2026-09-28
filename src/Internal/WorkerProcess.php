@@ -27,6 +27,8 @@ use Fabpot\Amp\Sqlite\SqliteSynchronousMode;
 final class WorkerProcess
 {
     private const SQLITE_BUSY = 5;
+    private const ROW_PRODUCING_DML_CACHE_SIZE = 256;
+    private const ROW_PRODUCING_DML_CACHE_MAX_SQL_LENGTH = 4096;
 
     private readonly \SQLite3 $database;
     private readonly int $batchSize;
@@ -53,6 +55,9 @@ final class WorkerProcess
 
     /** @var array<string, array{schema_version: int, ordinary: bool}> */
     private array $ordinaryRowIdTables = [];
+
+    /** @var array<string, bool> */
+    private array $rowProducingDml = [];
 
     /** @var array<int, array{result: \SQLite3Result, statement: \SQLite3Stmt, statement_id: int|null, pending: SqliteRow|null}> */
     private array $results = [];
@@ -861,6 +866,20 @@ final class WorkerProcess
     }
 
     private function producesRows(string $sql): bool
+    {
+        // Without count_changes, only the SQL text (a RETURNING clause) decides whether DML produces rows
+        if (\strlen($sql) > self::ROW_PRODUCING_DML_CACHE_MAX_SQL_LENGTH || $this->queryInternal('PRAGMA count_changes')) {
+            return $this->explainProducesRows($sql);
+        }
+
+        if (!isset($this->rowProducingDml[$sql]) && \count($this->rowProducingDml) >= self::ROW_PRODUCING_DML_CACHE_SIZE) {
+            unset($this->rowProducingDml[\array_key_first($this->rowProducingDml)]);
+        }
+
+        return $this->rowProducingDml[$sql] ??= $this->explainProducesRows($sql);
+    }
+
+    private function explainProducesRows(string $sql): bool
     {
         $statement = $this->database->prepare('EXPLAIN ' . SqlStatementBoundary::skipInsignificant($sql));
         if (!$statement) {
