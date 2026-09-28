@@ -13,47 +13,77 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Internal;
 
-use Amp\Sql\Common\SqlPooledResult;
-use Amp\Sql\SqlResult;
+use Amp\ForbidCloning;
+use Amp\ForbidSerialization;
 use Fabpot\Amp\Sqlite\SqliteBlob;
-use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 
 /**
+ * Releases its pooled resource as soon as the wrapped result is closed, since SQLite never returns a next result.
+ *
  * @internal
  *
- * @extends SqlPooledResult<null|int|float|string|SqliteBlob, SqliteResult>
+ * @implements \IteratorAggregate<int, array<array-key, null|int|float|string|SqliteBlob>>
  */
-final class PooledResult extends SqlPooledResult implements SqliteResult
+final class PooledResult implements SqliteResult, \IteratorAggregate
 {
-    private readonly SqliteResult $result;
+    use ForbidCloning;
+    use ForbidSerialization;
+
+    /** @var null|\Closure():void */
+    private ?\Closure $release;
 
     /**
      * @param \Closure():void $release
      */
-    public function __construct(SqliteResult $result, \Closure $release)
-    {
-        parent::__construct($result, $release);
-        $this->result = $result;
+    public function __construct(
+        private readonly SqliteResult $result,
+        \Closure $release,
+    ) {
+        $this->release = $release;
+        $this->releaseIfClosed();
+    }
 
-        if ($result->isClosed()) {
-            parent::getNextResult();
-        }
+    public function __destruct()
+    {
+        $this->close();
     }
 
     public function fetchRow(): ?array
     {
-        return parent::fetchRow() ?? $this->result->fetchRow();
+        try {
+            return $this->result->fetchRow();
+        } finally {
+            $this->releaseIfClosed();
+        }
+    }
+
+    public function getIterator(): \Traversable
+    {
+        try {
+            foreach ($this->result as $row) {
+                $this->releaseIfClosed();
+
+                yield $row;
+            }
+        } finally {
+            $this->releaseIfClosed();
+        }
     }
 
     public function getNextResult(): ?SqliteResult
     {
-        return parent::getNextResult();
+        return null;
     }
 
-    public function getLastInsertId(): ?int
+    public function getRowCount(): ?int
     {
-        return $this->result->getLastInsertId();
+        return $this->result->getRowCount();
+    }
+
+    public function getColumnCount(): ?int
+    {
+        return $this->result->getColumnCount();
     }
 
     public function getColumnNames(): ?array
@@ -61,15 +91,17 @@ final class PooledResult extends SqlPooledResult implements SqliteResult
         return $this->result->getColumnNames();
     }
 
+    public function getLastInsertId(): ?int
+    {
+        return $this->result->getLastInsertId();
+    }
+
     public function close(): void
     {
-        $this->result->close();
-
         try {
-            while (parent::fetchRow() !== null) {
-            }
-        } catch (SqliteConnectionException) {
-            // Closing a result of a closed connection is a no-op
+            $this->result->close();
+        } finally {
+            $this->release();
         }
     }
 
@@ -83,10 +115,19 @@ final class PooledResult extends SqlPooledResult implements SqliteResult
         $this->result->onClose($onClose);
     }
 
-    protected static function newInstanceFrom(SqlResult $result, \Closure $release): self
+    private function releaseIfClosed(): void
     {
-        \assert($result instanceof SqliteResult);
+        if ($this->result->isClosed()) {
+            $this->release();
+        }
+    }
 
-        return new self($result, $release);
+    private function release(): void
+    {
+        $release = $this->release;
+        $this->release = null;
+        if ($release !== null) {
+            $release();
+        }
     }
 }

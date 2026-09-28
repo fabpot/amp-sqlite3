@@ -91,9 +91,7 @@ final class StatementPool implements SqliteStatement
             throw $exception;
         }
 
-        $result->onClose(fn () => $this->push($statement));
-
-        return $result;
+        return new PooledResult($result, fn () => $this->push($statement));
     }
 
     public function getQuery(): string

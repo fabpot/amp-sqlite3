@@ -498,6 +498,62 @@ final class SqliteConnectionPoolTest extends TestCase
         }
     }
 
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function testReadingTheLastRowReleasesTheConnectionRightAway(bool $iterate): void
+    {
+        $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 1);
+
+        try {
+            $result = $pool->query('SELECT 1 AS value');
+            self::assertSame(0, $pool->getIdleConnectionCount());
+
+            if ($iterate) {
+                foreach ($result as $row) {
+                    self::assertSame(['value' => 1], $row);
+                    self::assertSame(1, $pool->getIdleConnectionCount());
+                }
+            } else {
+                self::assertSame(['value' => 1], $result->fetchRow());
+            }
+            self::assertSame(1, $pool->getIdleConnectionCount());
+        } finally {
+            $pool->close();
+        }
+    }
+
+    public function testClosingAnUnreadResultReleasesTheConnectionRightAway(): void
+    {
+        $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize(1), maxConnections: 1);
+
+        try {
+            $result = $pool->query('SELECT 1 AS value UNION ALL SELECT 2');
+            $result->close();
+
+            self::assertSame(1, $pool->getIdleConnectionCount());
+        } finally {
+            $pool->close();
+        }
+    }
+
+    #[TestWith(['SELECT ? AS value'])]
+    #[TestWith(['INSERT INTO entries VALUES (?)'])]
+    public function testSequentialPreparedExecutionsReuseTheSameConnection(string $sql): void
+    {
+        $pool = new SqliteConnectionPool(new SqliteConfig($this->path), maxConnections: 2);
+
+        try {
+            $statement = $pool->prepare($sql);
+            for ($i = 0; $i < 3; ++$i) {
+                $statement->execute([$i])->fetchRow();
+            }
+
+            self::assertSame(1, $pool->getConnectionCount());
+        } finally {
+            $pool->close();
+        }
+    }
+
     public function testPooledFetchAfterPoolCloseFailsAndResultCanStillBeClosed(): void
     {
         $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize(1));

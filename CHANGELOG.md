@@ -17,6 +17,7 @@
 - Read result rows in constant time so larger batch sizes no longer slow down iteration
 - Speed up direct INSERT queries by caching whether each target table has rowids until its schema changes
 - Speed up direct INSERT, UPDATE, and DELETE queries by caching whether their SQL produces rows
+- Return pooled connections and prepared statements to the pool as soon as their result is read or closed
 
 ## 1.0.0
 
