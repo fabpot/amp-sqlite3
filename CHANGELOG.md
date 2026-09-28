@@ -7,6 +7,7 @@
 - Roll back abandoned transactions even while their prepared statements are still referenced
 - Apply additional pragmas before enabling WAL so settings such as page_size take effect on new databases
 - Ignore empty SQL statements so they no longer break scripts or hide transaction control from executeScript()
+- Reject SQL containing NUL bytes instead of letting SQLite silently ignore the rest of the text
 
 ## 1.0.0
 

@@ -61,6 +61,15 @@ final class SqliteQueryTest extends TestCase
         yield 'comment' => ['/* only a comment */ -- still a comment', 'SQL must contain an executable statement'];
         yield 'semicolon' => [';;;', 'SQL must contain an executable statement'];
         yield 'second statement' => ['SELECT 1; SELECT 2', 'Only one SQL statement may be executed at a time'];
+        yield 'NUL byte' => ["SELECT 1\0", 'SQL must not contain NUL bytes'];
+    }
+
+    public function testRejectsScriptWithNulByte(): void
+    {
+        $this->expectException(SqliteQueryError::class);
+        $this->expectExceptionMessage('SQL must not contain NUL bytes');
+
+        $this->connection->executeScript("CREATE TABLE events (name TEXT);\0; CREATE TABLE ignored (name TEXT)");
     }
 
     public function testAllowsTrailingCommentsAndSemicolonsInsideCompoundStatement(): void

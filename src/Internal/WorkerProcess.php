@@ -145,14 +145,14 @@ final class WorkerProcess
             'readBlob' => $this->readBlob(self::requirePositiveInt($request, 'blob_id'), self::requirePositiveInt($request, 'length')),
             'writeBlob' => $this->writeBlob(self::requirePositiveInt($request, 'blob_id'), self::requireString($request, 'bytes')),
             'closeBlob' => $this->closeBlob(self::requirePositiveInt($request, 'blob_id')),
-            'prepare' => $this->prepare(self::requireString($request, 'sql')),
+            'prepare' => $this->prepare(self::requireSql($request)),
             'closeStatement' => $this->closeStatement(self::requirePositiveInt($request, 'statement_id')),
             'fetch' => $this->fetch(self::requirePositiveInt($request, 'result_id')),
             'closeResult' => $this->closeResult(self::requirePositiveInt($request, 'result_id')),
             'execute' => $this->execute($request),
             'executeStatement' => $this->execute($request, self::requirePositiveInt($request, 'statement_id')),
             'executeScript' => $this->executeScript(
-                self::requireString($request, 'sql'),
+                self::requireSql($request),
                 self::requireTransactionMode($request),
             ),
             default => throw new ProtocolError("Unknown operation '{$operation}'"),
@@ -220,6 +220,19 @@ final class WorkerProcess
         }
 
         return (string) $request[$key];
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     */
+    private static function requireSql(array $request): string
+    {
+        $sql = self::requireString($request, 'sql');
+        if (\str_contains($sql, "\0")) {
+            throw new \RuntimeException('SQL must not contain NUL bytes');
+        }
+
+        return $sql;
     }
 
     /**
@@ -567,7 +580,7 @@ final class WorkerProcess
             }
             $this->refreshStatementMetadata($statement);
         } else {
-            $statement = $this->prepareSingleStatement(self::requireString($request, 'sql'), 'Only one SQL statement may be executed at a time');
+            $statement = $this->prepareSingleStatement(self::requireSql($request), 'Only one SQL statement may be executed at a time');
         }
 
         $this->bindParameters($statement, $request);
