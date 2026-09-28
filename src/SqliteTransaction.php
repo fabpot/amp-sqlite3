@@ -21,7 +21,8 @@ use Amp\Sql\SqlTransaction;
 interface SqliteTransaction extends SqliteLink, SqlTransaction
 {
     /**
-     * @throws SqliteTransactionError If the transaction is inactive or has an active nested transaction.
+     * @throws SqliteTransactionError If the transaction is inactive, has an active nested transaction, or has unread results
+     *                                 or open BLOB streams owned by the current fiber.
      * @throws SqliteQueryError If SQLite rejects the commit, for example because of a deferred constraint.
      * @throws SqliteConnectionException If the connection is lost while committing.
      */

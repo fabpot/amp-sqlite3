@@ -9,6 +9,7 @@
 - Ignore empty SQL statements so they no longer break scripts or hide transaction control from executeScript()
 - Reject SQL containing NUL bytes instead of letting SQLite silently ignore the rest of the text
 - Make beginTransaction() wait for the active transaction to finish instead of throwing, like other connection operations
+- Throw instead of deadlocking when a fiber finishes a transaction while holding its unread results or BLOB streams
 
 ## 1.0.0
 

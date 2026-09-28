@@ -20,8 +20,10 @@ use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteStatement;
+use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 use function Amp\delay;
@@ -329,6 +331,75 @@ final class SqliteTransactionTest extends TestCase
         $transaction->commit();
 
         self::assertSame(['c' => 4], $this->connection->query('SELECT COUNT(*) AS c FROM entries')->fetchRow());
+    }
+
+    /**
+     * @param \Closure(SqliteTransaction):mixed $finish
+     */
+    #[DataProvider('provideTransactionControlOperations')]
+    public function testRejectsTransactionControlWhileCurrentTaskHoldsUnreadResult(\Closure $finish): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $result = $transaction->query("SELECT 'first' AS value UNION ALL SELECT 'second'");
+
+        try {
+            $finish($transaction);
+            self::fail('Expected the unread result to be rejected');
+        } catch (SqliteTransactionError $error) {
+            self::assertSame('Close the unread results and BLOB streams of the transaction first', $error->getMessage());
+        }
+
+        $result->close();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['committed']);
+        $transaction->commit();
+
+        self::assertSame([['value' => 'committed']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public static function provideTransactionControlOperations(): iterable
+    {
+        yield 'commit' => [static fn (SqliteTransaction $transaction) => $transaction->commit()];
+        yield 'rollback' => [static fn (SqliteTransaction $transaction) => $transaction->rollback()];
+        yield 'nested transaction' => [static fn (SqliteTransaction $transaction) => $transaction->beginTransaction()];
+    }
+
+    public function testRejectsCommitWhileCurrentTaskHoldsOpenBlob(): void
+    {
+        $this->connection->query('CREATE TABLE files (contents BLOB)');
+        $this->connection->query('INSERT INTO files VALUES (zeroblob(1))');
+        $transaction = $this->connection->beginTransaction();
+        $blob = $transaction->openBlob('files', 'contents', 1);
+
+        try {
+            $transaction->commit();
+            self::fail('Expected the open BLOB stream to be rejected');
+        } catch (SqliteTransactionError $error) {
+            self::assertSame('Close the unread results and BLOB streams of the transaction first', $error->getMessage());
+        }
+
+        $blob->close();
+        $transaction->commit();
+
+        self::assertFalse($transaction->isActive());
+    }
+
+    public function testCommitQueuedByTaskHoldingResultWaitsForResult(): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $commit = null;
+        $result = async(function () use ($transaction, &$commit) {
+            $result = $transaction->query("SELECT 'first' AS value UNION ALL SELECT 'second'");
+            $commit = async(fn () => $transaction->commit());
+
+            return $result;
+        })->await();
+        delay(0.05);
+
+        self::assertFalse($commit->isComplete());
+        $result->close();
+        $commit->await();
+
+        self::assertFalse($transaction->isActive());
     }
 
     public function testCommitWaitsForResultOpenedConcurrentlyWithAnotherResult(): void

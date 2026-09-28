@@ -33,6 +33,7 @@ use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
+use Revolt\EventLoop\FiberLocal;
 
 /** @internal */
 final class Connection implements SqliteConnection
@@ -65,6 +66,10 @@ final class Connection implements SqliteConnection
     private ?\WeakReference $activeTransaction = null;
     private ?Lock $transactionLock = null;
     private int $transactionLeases = 0;
+    /** @var \WeakMap<\stdClass, int> */
+    private \WeakMap $transactionLeaseOwners;
+    /** @var FiberLocal<\stdClass> */
+    private readonly FiberLocal $task;
     /** @var DeferredFuture<null>|null */
     private ?DeferredFuture $transactionIdle = null;
 
@@ -87,6 +92,10 @@ final class Connection implements SqliteConnection
         /** @var \WeakMap<BlobStream, true> $blobs */
         $blobs = new \WeakMap();
         $this->blobs = $blobs;
+        /** @var \WeakMap<\stdClass, int> $transactionLeaseOwners */
+        $transactionLeaseOwners = new \WeakMap();
+        $this->transactionLeaseOwners = $transactionLeaseOwners;
+        $this->task = new FiberLocal(static fn (): \stdClass => new \stdClass());
         $this->transactionMode = $config->getTransactionMode();
         $this->lastUsedAt = \time();
     }
@@ -292,6 +301,10 @@ final class Connection implements SqliteConnection
 
     public function executeControl(string $sql): void
     {
+        if (isset($this->transactionLeaseOwners[$this->task->get()])) {
+            throw new SqliteTransactionError('Close the unread results and BLOB streams of the transaction first');
+        }
+
         $this->awaitTransactionResource();
         $value = $this->requestResultPayload('execute', $sql, ['sql' => $sql, 'params' => []]);
         if ($value['result_id'] !== null) {
@@ -367,9 +380,10 @@ final class Connection implements SqliteConnection
         }
 
         ++$this->activeLeases;
+        $owner = $transactional ? $this->trackTransactionLeaseOwner() : null;
 
         $released = false;
-        $release = function () use (&$released, $transactional, $lock): void {
+        $release = function () use (&$released, $transactional, $lock, $owner): void {
             if ($released) {
                 return;
             }
@@ -380,7 +394,7 @@ final class Connection implements SqliteConnection
             }
             $lock?->release();
             if ($transactional) {
-                $this->releaseTransactionLease();
+                $this->releaseTransactionLease($owner);
             }
         };
         $blobId = $value['blob_id'];
@@ -494,9 +508,10 @@ final class Connection implements SqliteConnection
             }
         } else {
             ++$this->activeLeases;
+            $owner = $transactional ? $this->trackTransactionLeaseOwner() : null;
 
             $released = false;
-            $onRelease = function () use (&$released, $transactional): void {
+            $onRelease = function () use (&$released, $transactional, $owner): void {
                 if ($released) {
                     return;
                 }
@@ -506,7 +521,7 @@ final class Connection implements SqliteConnection
                     --$this->activeLeases;
                 }
                 if ($transactional) {
-                    $this->releaseTransactionLease();
+                    $this->releaseTransactionLease($owner);
                 }
             };
         }
@@ -851,8 +866,20 @@ final class Connection implements SqliteConnection
         }
     }
 
-    private function releaseTransactionLease(): void
+    private function trackTransactionLeaseOwner(): \stdClass
     {
+        $owner = $this->task->get();
+        $this->transactionLeaseOwners[$owner] = ($this->transactionLeaseOwners[$owner] ?? 0) + 1;
+
+        return $owner;
+    }
+
+    private function releaseTransactionLease(?\stdClass $owner = null): void
+    {
+        if ($owner !== null && isset($this->transactionLeaseOwners[$owner]) && --$this->transactionLeaseOwners[$owner] === 0) {
+            unset($this->transactionLeaseOwners[$owner]);
+        }
+
         if ($this->transactionLeases === 0) {
             return;
         }
@@ -898,6 +925,7 @@ final class Connection implements SqliteConnection
         $this->transactionLock?->release();
         $this->transactionLock = null;
         $this->transactionLeases = 0;
+        $this->transactionLeaseOwners = new \WeakMap();
         $this->transactionIdle?->complete();
         $this->transactionIdle = null;
         $this->activeLeases = 0;
