@@ -116,18 +116,9 @@ final class Connection implements SqliteConnection
 
     public function beginTransaction(): SqliteTransaction
     {
-        if ($this->activeTransaction?->get() !== null) {
-            throw new SqliteTransactionError('A transaction is already active');
-        }
-
         $lock = $this->acquireConnectionLock();
 
         try {
-            $this->assertOpen();
-            if ($this->activeTransaction?->get() !== null) {
-                throw new SqliteTransactionError('A transaction is already active');
-            }
-
             $this->executeControl('BEGIN ' . $this->transactionMode->toSql());
         } catch (\Throwable $exception) {
             $lock->release();

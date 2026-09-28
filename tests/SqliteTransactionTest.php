@@ -115,6 +115,23 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame([['value' => 'first']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
+    public function testBeginTransactionWaitsForActiveTransaction(): void
+    {
+        $first = $this->connection->beginTransaction();
+        $second = async(fn () => $this->connection->beginTransaction());
+        delay(0.05);
+
+        self::assertFalse($second->isComplete());
+        $first->execute('INSERT INTO entries VALUES (?)', ['first']);
+        $first->commit();
+
+        $transaction = $second->await();
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['second']);
+        $transaction->commit();
+
+        self::assertSame([['value' => 'first'], ['value' => 'second']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
     public function testNestedCommitAndRollbackUseSavepoints(): void
     {
         $transaction = $this->connection->beginTransaction();

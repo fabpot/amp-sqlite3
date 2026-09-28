@@ -8,6 +8,7 @@
 - Apply additional pragmas before enabling WAL so settings such as page_size take effect on new databases
 - Ignore empty SQL statements so they no longer break scripts or hide transaction control from executeScript()
 - Reject SQL containing NUL bytes instead of letting SQLite silently ignore the rest of the text
+- Make beginTransaction() wait for the active transaction to finish instead of throwing, like other connection operations
 
 ## 1.0.0
 
