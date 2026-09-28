@@ -116,12 +116,14 @@ final class WorkerProcess
 
         $this->applyPragma('trusted_schema', $open['trusted_schema']);
         $this->applyPragma('foreign_keys', $open['foreign_keys']);
-        $this->applyJournalMode($open);
-        $this->applySynchronousMode($open);
 
+        // Pragmas such as page_size only take effect before WAL mode is enabled
         foreach ($open['pragmas'] as $name => $value) {
             $this->applyPragma($name, $value);
         }
+
+        $this->applyJournalMode($open);
+        $this->applySynchronousMode($open);
 
         $this->registerFunctions($open['functions']);
         $this->registerAggregates($open['aggregates']);

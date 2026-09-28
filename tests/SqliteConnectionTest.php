@@ -237,6 +237,25 @@ final class SqliteConnectionTest extends TestCase
         }
     }
 
+    public function testAppliesAdditionalPragmasBeforeEnablingWal(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $config = (new SqliteConfig($path))->withPragma('page_size', 8192);
+        $connection = (new SqliteConnector())->connect($config);
+
+        try {
+            $connection->query('CREATE TABLE entries (value TEXT)');
+
+            self::assertSame(['journal_mode' => 'wal'], $connection->query('PRAGMA journal_mode')->fetchRow());
+            self::assertSame(['page_size' => 8192], $connection->query('PRAGMA page_size')->fetchRow());
+        } finally {
+            $connection->close();
+            @\unlink($path);
+            @\unlink($path . '-shm');
+            @\unlink($path . '-wal');
+        }
+    }
+
     public function testConnectionCloseInterruptsActiveChildOperation(): void
     {
         $config = (new SqliteConfig(':memory:'))->withFunction('pause', 'usleep', 1);
