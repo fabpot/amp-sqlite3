@@ -17,7 +17,6 @@ use Amp\DeferredFuture;
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
 use Amp\Sql\SqlTransactionIsolation;
-use Amp\Sync\LocalMutex;
 use Amp\Sync\Lock;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
@@ -31,7 +30,6 @@ use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
-use Revolt\EventLoop\FiberLocal;
 
 /** @internal */
 final class Connection implements SqliteConnection
@@ -39,7 +37,6 @@ final class Connection implements SqliteConnection
     use ForbidCloning;
     use ForbidSerialization;
 
-    private readonly LocalMutex $mutex;
     /** @var DeferredFuture<null> */
     private readonly DeferredFuture $onClose;
 
@@ -54,24 +51,14 @@ final class Connection implements SqliteConnection
 
     private SqliteTransactionMode $transactionMode;
     private bool $closed = false;
-    private int $activeConnectionLocks = 0;
-    private int $activeLeases = 0;
     /** @var \WeakReference<Transaction>|null */
     private ?\WeakReference $activeTransaction = null;
-    private ?Lock $transactionLock = null;
-    private int $transactionLeases = 0;
-    /** @var \WeakMap<\stdClass, int> */
-    private \WeakMap $transactionLeaseOwners;
-    /** @var FiberLocal<\stdClass> */
-    private readonly FiberLocal $task;
-    /** @var DeferredFuture<null>|null */
-    private ?DeferredFuture $transactionIdle = null;
 
     public function __construct(
         private readonly SqliteConfig $config,
         private readonly WorkerChannel $channel,
+        private readonly ConnectionLeases $leases,
     ) {
-        $this->mutex = new LocalMutex();
         $this->onClose = new DeferredFuture();
         /** @var \WeakMap<Result, true> $results */
         $results = new \WeakMap();
@@ -82,10 +69,6 @@ final class Connection implements SqliteConnection
         /** @var \WeakMap<BlobStream, true> $blobs */
         $blobs = new \WeakMap();
         $this->blobs = $blobs;
-        /** @var \WeakMap<\stdClass, int> $transactionLeaseOwners */
-        $transactionLeaseOwners = new \WeakMap();
-        $this->transactionLeaseOwners = $transactionLeaseOwners;
-        $this->task = new FiberLocal(static fn (): \stdClass => new \stdClass());
         $this->transactionMode = $config->getTransactionMode();
     }
 
@@ -123,7 +106,7 @@ final class Connection implements SqliteConnection
             throw $exception;
         }
 
-        $this->transactionLock = $lock;
+        $this->leases->beginTransaction($lock);
         $transaction = new Transaction($this, $this->transactionMode);
         $this->activeTransaction = \WeakReference::create($transaction);
 
@@ -174,14 +157,14 @@ final class Connection implements SqliteConnection
 
         $this->closed = true;
 
-        if ($this->channel->isBusy() || $this->activeConnectionLocks > 0 || $this->activeLeases > 0 || $this->transactionLock !== null) {
+        if ($this->channel->isBusy() || $this->leases->isBusy()) {
             $this->forceClose();
 
             return;
         }
 
         $this->closeDependents();
-        $lock = $this->mutex->acquire();
+        $lock = $this->leases->acquireConnection();
         try {
             $this->channel->close();
         } catch (WorkerFailure) {
@@ -282,11 +265,11 @@ final class Connection implements SqliteConnection
 
     public function executeControl(string $sql): void
     {
-        if (isset($this->transactionLeaseOwners[$this->task->get()])) {
+        if ($this->leases->currentTaskHoldsTransactionLease()) {
             throw new SqliteTransactionError('Close the unread results and BLOB streams of the transaction first');
         }
 
-        $this->awaitTransactionResource();
+        $this->leases->awaitTransactionIdle();
         $value = $this->requestResultPayload('execute', $sql, ['sql' => $sql, 'params' => []]);
         if ($value['result_id'] !== null) {
             $this->closeResult($value['result_id'], $sql);
@@ -301,8 +284,7 @@ final class Connection implements SqliteConnection
         }
 
         $this->activeTransaction = null;
-        $this->transactionLock?->release();
-        $this->transactionLock = null;
+        $this->leases->endTransaction();
     }
 
     public function closeStatement(int $statementId, string $sql): void
@@ -360,24 +342,7 @@ final class Connection implements SqliteConnection
             throw $exception;
         }
 
-        ++$this->activeLeases;
-        $owner = $transactional ? $this->trackTransactionLeaseOwner() : null;
-
-        $released = false;
-        $release = function () use (&$released, $transactional, $lock, $owner): void {
-            if ($released) {
-                return;
-            }
-
-            $released = true;
-            if ($this->activeLeases > 0) {
-                --$this->activeLeases;
-            }
-            $lock?->release();
-            if ($transactional) {
-                $this->releaseTransactionLease($owner);
-            }
-        };
+        $lease = $this->leases->retain($lock, $transactional);
         $blobId = $value['blob_id'];
 
         $blob = new BlobStream(
@@ -393,7 +358,7 @@ final class Connection implements SqliteConnection
                     'bytes' => $bytes,
                 ]);
             },
-            function () use ($blobId, $release): void {
+            function () use ($blobId, $lease): void {
                 try {
                     if (!$this->closed && !$this->channel->isClosed()) {
                         $this->requestVoid('closeBlob', '', ['blob_id' => $blobId]);
@@ -401,7 +366,7 @@ final class Connection implements SqliteConnection
                 } catch (SqliteConnectionException) {
                     // Closing a BLOB on a dead connection is a no-op.
                 } finally {
-                    $release();
+                    $lease->release();
                 }
             },
             $transaction ?: null,
@@ -458,21 +423,14 @@ final class Connection implements SqliteConnection
             return $this->acquireConnectionLock();
         }
 
-        $this->awaitTransactionResource();
-        if ($this->closed || $this->transactionLock === null) {
-            throw new SqliteTransactionError('The transaction is no longer active');
-        }
-        ++$this->transactionLeases;
+        $this->leases->acquireTransactionLease();
 
         return null;
     }
 
     private function releaseAcquired(?Lock $lock, bool $transactional): void
     {
-        $lock?->release();
-        if ($transactional) {
-            $this->releaseTransactionLease();
-        }
+        $this->leases->release($lock, $transactional);
     }
 
     /**
@@ -481,30 +439,11 @@ final class Connection implements SqliteConnection
     private function createResult(array $value, string $sql, ?Lock $lock, ?Transaction $transaction = null): SqliteResult
     {
         $transactional = $transaction !== null;
-        $onRelease = null;
+        $lease = null;
         if ($value['exhausted']) {
-            $lock?->release();
-            if ($transactional) {
-                $this->releaseTransactionLease();
-            }
+            $this->leases->release($lock, $transactional);
         } else {
-            ++$this->activeLeases;
-            $owner = $transactional ? $this->trackTransactionLeaseOwner() : null;
-
-            $released = false;
-            $onRelease = function () use (&$released, $transactional, $owner): void {
-                if ($released) {
-                    return;
-                }
-
-                $released = true;
-                if ($this->activeLeases > 0) {
-                    --$this->activeLeases;
-                }
-                if ($transactional) {
-                    $this->releaseTransactionLease($owner);
-                }
-            };
+            $lease = $this->leases->retain($lock, $transactional);
         }
 
         $result = new Result(
@@ -517,8 +456,7 @@ final class Connection implements SqliteConnection
             $value['exhausted'],
             fn (int $resultId): array => $this->requestBatchPayload('fetch', $sql, ['result_id' => $resultId]),
             fn (int $resultId): null => $this->closeResult($resultId, $sql),
-            $value['exhausted'] ? null : $lock,
-            $onRelease,
+            $lease,
             $value['exhausted'] ? null : $transaction,
         );
         $this->results[$result] = true;
@@ -627,52 +565,16 @@ final class Connection implements SqliteConnection
         throw new SqliteConnectionException($failure->getMessage(), previous: $failure->getPrevious());
     }
 
-    private function awaitTransactionResource(): void
-    {
-        while ($this->transactionLeases > 0) {
-            ($this->transactionIdle ??= new DeferredFuture())->getFuture()->await();
-        }
-    }
-
-    private function trackTransactionLeaseOwner(): \stdClass
-    {
-        $owner = $this->task->get();
-        $this->transactionLeaseOwners[$owner] = ($this->transactionLeaseOwners[$owner] ?? 0) + 1;
-
-        return $owner;
-    }
-
-    private function releaseTransactionLease(?\stdClass $owner = null): void
-    {
-        if ($owner !== null && isset($this->transactionLeaseOwners[$owner]) && --$this->transactionLeaseOwners[$owner] === 0) {
-            unset($this->transactionLeaseOwners[$owner]);
-        }
-
-        if ($this->transactionLeases === 0) {
-            return;
-        }
-
-        if (--$this->transactionLeases === 0) {
-            $this->transactionIdle?->complete();
-            $this->transactionIdle = null;
-        }
-    }
-
     private function acquireConnectionLock(): Lock
     {
-        $lock = $this->mutex->acquire();
+        $lock = $this->leases->acquireConnection();
         if ($this->closed) {
             $lock->release();
 
             throw new SqliteConnectionException('The SQLite connection is closed');
         }
 
-        ++$this->activeConnectionLocks;
-
-        return new Lock(function () use ($lock): void {
-            --$this->activeConnectionLocks;
-            $lock->release();
-        });
+        return $lock;
     }
 
     private function assertOpen(): void
@@ -690,13 +592,7 @@ final class Connection implements SqliteConnection
         $this->activeTransaction = null;
         $transaction?->releaseOnConnectionClose();
 
-        $this->transactionLock?->release();
-        $this->transactionLock = null;
-        $this->transactionLeases = 0;
-        $this->transactionLeaseOwners = new \WeakMap();
-        $this->transactionIdle?->complete();
-        $this->transactionIdle = null;
-        $this->activeLeases = 0;
+        $this->leases->reset();
 
         $this->channel->kill();
 
