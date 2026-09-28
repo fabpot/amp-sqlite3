@@ -933,155 +933,43 @@ final class WorkerProcess
     }
 
     /**
+     * Virtual tables have no root page, and the primary key index of a WITHOUT ROWID table is the table itself, so it
+     * has no schema entry of its own.
+     *
      * @param SqliteInsertTarget $target
      */
     private function isOrdinaryRowIdTable(array $target): bool
     {
-        $database = '"' . \str_replace('"', '""', $target['database']) . '"';
         // sqlite_schema only exists since SQLite 3.33
-        $statement = $this->database->prepare("SELECT type, sql FROM {$database}.sqlite_master WHERE name = :name");
+        $schema = '"' . \str_replace('"', '""', $target['database']) . '".sqlite_master';
+        $statement = $this->database->prepare(<<<SQL
+            SELECT 1 FROM {$schema} AS t
+            WHERE t.name = :name AND t.type = 'table' AND t.rootpage <> 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM pragma_index_list(t.name, :database) AS i
+                    WHERE i.origin = 'pk' AND i.name NOT IN (SELECT name FROM {$schema} WHERE type = 'index')
+                )
+            SQL);
         if (!$statement) {
             return false;
         }
 
         try {
             $statement->bindValue(':name', $target['table'], SQLITE3_TEXT);
+            $statement->bindValue(':database', $target['database'], SQLITE3_TEXT);
             $result = $statement->execute();
             if ($result === false) {
                 return false;
             }
 
             try {
-                $row = $result->fetchArray(SQLITE3_ASSOC);
+                return $result->fetchArray(SQLITE3_NUM) !== false;
             } finally {
                 $result->finalize();
             }
         } finally {
             $statement->close();
         }
-
-        if ($row === false || ($row['type'] ?? null) !== 'table') {
-            return false;
-        }
-        $sql = $row['sql'] ?? null;
-        if (!\is_string($sql)) {
-            return false;
-        }
-
-        return self::isOrdinaryTableDefinition($sql);
-    }
-
-    private static function isOrdinaryTableDefinition(string $sql): bool
-    {
-        /** @var list<array{word: string, depth: int, after_definition: bool}> $words */
-        $words = [];
-        $length = \strlen($sql);
-        $depth = 0;
-        $afterDefinition = false;
-
-        for ($offset = 0; $offset < $length;) {
-            $character = $sql[$offset];
-            $next = $sql[$offset + 1] ?? '';
-
-            if ($character === '-' && $next === '-') {
-                $newline = \strcspn($sql, "\r\n", $offset + 2);
-                $offset += 2 + $newline;
-                continue;
-            }
-            if ($character === '/' && $next === '*') {
-                $end = \strpos($sql, '*/', $offset + 2);
-                $offset = $end === false ? $length : $end + 2;
-                continue;
-            }
-            if ($character === "'" || $character === '"' || $character === '`') {
-                $quote = $character;
-                ++$offset;
-                while ($offset < $length) {
-                    if ($sql[$offset] !== $quote) {
-                        ++$offset;
-                        continue;
-                    }
-                    if (($sql[$offset + 1] ?? '') === $quote) {
-                        $offset += 2;
-                        continue;
-                    }
-
-                    ++$offset;
-                    break;
-                }
-                continue;
-            }
-            if ($character === '[') {
-                $end = \strpos($sql, ']', $offset + 1);
-                $offset = $end === false ? $length : $end + 1;
-                continue;
-            }
-            if ($character === '(') {
-                ++$depth;
-                ++$offset;
-                continue;
-            }
-            if ($character === ')') {
-                if ($depth === 1) {
-                    $afterDefinition = true;
-                }
-                $depth = \max(0, $depth - 1);
-                ++$offset;
-                continue;
-            }
-            if (!(
-                ('A' <= $character && $character <= 'Z')
-                || ('a' <= $character && $character <= 'z')
-                || $character === '_'
-            )) {
-                ++$offset;
-                continue;
-            }
-
-            $start = $offset++;
-            while ($offset < $length) {
-                $character = $sql[$offset];
-                if (!(
-                    ('A' <= $character && $character <= 'Z')
-                    || ('a' <= $character && $character <= 'z')
-                    || ('0' <= $character && $character <= '9')
-                    || $character === '_'
-                )) {
-                    break;
-                }
-                ++$offset;
-            }
-            $words[] = [
-                'word' => \strtoupper(\substr($sql, $start, $offset - $start)),
-                'depth' => $depth,
-                'after_definition' => $afterDefinition,
-            ];
-        }
-
-        if (($words[0]['word'] ?? null) === 'CREATE'
-            && ($words[1]['word'] ?? null) === 'VIRTUAL'
-            && ($words[2]['word'] ?? null) === 'TABLE'
-            && ($words[0]['depth'] ?? null) === 0
-            && ($words[1]['depth'] ?? null) === 0
-            && ($words[2]['depth'] ?? null) === 0
-        ) {
-            return false;
-        }
-
-        foreach ($words as $index => $word) {
-            $next = $words[$index + 1] ?? null;
-            if ($word['after_definition']
-                && $word['depth'] === 0
-                && $word['word'] === 'WITHOUT'
-                && $next !== null
-                && $next['depth'] === 0
-                && $next['word'] === 'ROWID'
-            ) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private function applyPragma(string $name, #[\SensitiveParameter] bool|int|float|string $value): null|bool|int|float|string

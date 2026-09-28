@@ -638,6 +638,36 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(1, $this->connection->query('INSERT INTO defaults_virtual DEFAULT VALUES')->getLastInsertId());
     }
 
+    #[DataProvider('provideInsertTargetStorage')]
+    public function testLastInsertIdDependsOnTableStorage(string $schema, string $insert, ?int $lastInsertId): void
+    {
+        $this->connection->executeScript($schema);
+
+        self::assertSame($lastInsertId, $this->connection->query($insert)->getLastInsertId());
+    }
+
+    public static function provideInsertTargetStorage(): iterable
+    {
+        yield 'integer primary key' => ['CREATE TABLE entries (id INTEGER PRIMARY KEY)', 'INSERT INTO entries DEFAULT VALUES', 1];
+        yield 'text primary key' => ['CREATE TABLE entries (code TEXT PRIMARY KEY)', "INSERT INTO entries VALUES ('a')", 1];
+        yield 'composite primary key' => ['CREATE TABLE entries (a, b, PRIMARY KEY (a, b), UNIQUE (b))', 'INSERT INTO entries VALUES (1, 2)', 1];
+        yield 'composite primary key without rowid' => ['CREATE TABLE entries (a, b, PRIMARY KEY (a, b), UNIQUE (b)) WITHOUT ROWID', 'INSERT INTO entries VALUES (1, 2)', null];
+        yield 'temporary table without rowid' => ['CREATE TEMP TABLE entries (code PRIMARY KEY) WITHOUT ROWID', "INSERT INTO entries VALUES ('a')", null];
+        yield 'attached table without rowid' => ["ATTACH DATABASE ':memory:' AS auxiliary; CREATE TABLE auxiliary.entries (code PRIMARY KEY) WITHOUT ROWID", "INSERT INTO auxiliary.entries VALUES ('a')", null];
+        yield 'attached table with rowid' => ["ATTACH DATABASE ':memory:' AS auxiliary; CREATE TABLE auxiliary.entries (code PRIMARY KEY)", "INSERT INTO auxiliary.entries VALUES ('a')", 1];
+    }
+
+    public function testLastInsertIdIsNullForVirtualTables(): void
+    {
+        if ($this->connection->query("SELECT sqlite_compileoption_used('ENABLE_FTS5') AS enabled")->fetchRow() !== ['enabled' => 1]) {
+            self::markTestSkipped('SQLite was built without FTS5');
+        }
+
+        $this->connection->query('CREATE VIRTUAL TABLE documents USING fts5(body)');
+
+        self::assertNull($this->connection->query("INSERT INTO documents VALUES ('text')")->getLastInsertId());
+    }
+
     public function testLastInsertIdSupportsTemporaryAndAttachedTables(): void
     {
         $this->connection->executeScript(<<<'SQL'
