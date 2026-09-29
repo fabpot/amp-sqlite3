@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.1
+## 1.1.0
 
 - Fix pooled results losing their last row and holding their connection when read with fetchRow()
 - Roll back abandoned nested transactions instead of blocking their parent transaction
