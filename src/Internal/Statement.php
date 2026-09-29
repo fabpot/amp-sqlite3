@@ -36,7 +36,7 @@ final class Statement implements SqliteStatement
     /** @var \WeakReference<SqliteResult>|null */
     private ?\WeakReference $activeResult = null;
     /** @var \WeakReference<Transaction>|null */
-    private ?\WeakReference $transaction;
+    private readonly ?\WeakReference $transaction;
 
     public function __construct(
         private readonly Connection $connection,
@@ -56,7 +56,6 @@ final class Statement implements SqliteStatement
         }
 
         $this->closed = true;
-        $this->transaction = null;
         EventLoop::queue(self::dispose(...), $this->connection, $this->statementId, $this->query, $this->activeResult, $this->onClose);
     }
 
@@ -111,7 +110,6 @@ final class Statement implements SqliteStatement
         }
 
         $this->closed = true;
-        $this->transaction = null;
         self::dispose($this->connection, $this->statementId, $this->query, $this->activeResult, $this->onClose);
     }
 

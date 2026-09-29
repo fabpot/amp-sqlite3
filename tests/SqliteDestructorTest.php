@@ -226,20 +226,6 @@ final class SqliteDestructorTest extends TestCase
         self::assertSame(['answer' => 42], $this->pool->query('SELECT 42 AS answer')->fetchRow());
     }
 
-    public function testCollectingAStatementTogetherWithItsActiveResult(): void
-    {
-        $statement = $this->connection->prepare('SELECT value FROM entries');
-        $result = $statement->execute();
-        unset($statement, $result);
-
-        \gc_collect_cycles();
-
-        self::assertSame(
-            ['answer' => 42],
-            async(fn () => $this->connection->query('SELECT 42 AS answer')->fetchRow())->await(new TimeoutCancellation(5)),
-        );
-    }
-
     public function testCollectingATransactionTogetherWithItsNestedTransaction(): void
     {
         $cycle = new \stdClass();

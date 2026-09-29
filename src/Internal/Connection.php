@@ -287,10 +287,10 @@ final class Connection implements SqliteConnection
             return;
         }
 
-        $this->releaseDroppedTransaction();
+        $this->releaseTransactionLock();
     }
 
-    public function releaseDroppedTransaction(): void
+    public function releaseTransactionLock(): void
     {
         $this->activeTransaction = null;
         $this->leases->releaseTransactionLock();
