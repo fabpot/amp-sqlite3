@@ -779,7 +779,7 @@ final class WorkerProcess
             throw $exception;
         }
 
-        $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $writes, 'ordinary_insert_target' => null];
+        $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $writes];
 
         return $statement;
     }
@@ -805,7 +805,7 @@ final class WorkerProcess
 
         $info = $this->statementInfo[$statement] ?? null;
         if ($metadata !== null && $info !== null) {
-            $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $info['writes'], 'ordinary_insert_target' => null];
+            $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $info['writes']];
         }
 
         return $result;
@@ -945,9 +945,7 @@ final class WorkerProcess
             return null;
         }
 
-        $ordinary = $info['ordinary_insert_target'] ?? $this->isCachedOrdinaryRowIdTable($target);
-        $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $info['writes'], 'ordinary_insert_target' => $ordinary];
-        if (!$ordinary) {
+        if (!$this->isCachedOrdinaryRowIdTable($target)) {
             return null;
         }
 
