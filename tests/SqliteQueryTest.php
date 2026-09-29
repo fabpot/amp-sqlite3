@@ -144,16 +144,58 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(['name' => 'created'], $this->connection->query('; SELECT name FROM events;;')->fetchRow());
     }
 
-    public function testScriptCannotHideTransactionControlBehindEmptyStatement(): void
+    #[DataProvider('provideInsignificantPrefixes')]
+    public function testScriptCannotHideTransactionControl(string $prefix): void
     {
         try {
-            $this->connection->executeScript("CREATE TABLE events (name TEXT); ;COMMIT; INSERT INTO events VALUES ('committed')");
+            $this->connection->executeScript("CREATE TABLE events (name TEXT);{$prefix}COMMIT; INSERT INTO events VALUES ('committed')");
             self::fail('Expected the transaction-control statement to be rejected');
         } catch (SqliteQueryError $error) {
             self::assertSame('SQL scripts cannot contain transaction-control statements', $error->getMessage());
         }
 
         self::assertNull($this->connection->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'")->fetchRow());
+    }
+
+    public static function provideInsignificantPrefixes(): iterable
+    {
+        yield 'empty statement' => [' ;'];
+        yield 'long comment block' => [\str_repeat("-- note\n", 4000)];
+        yield 'carriage return inside line comment' => [" --x\ry\n"];
+        yield 'vertical tab after whitespace' => [" \v"];
+    }
+
+    public function testScriptRunsStatementsAfterLongCommentBlock(): void
+    {
+        $this->connection->executeScript("CREATE TABLE events (name TEXT); INSERT INTO events VALUES ('first');" . \str_repeat("-- note\n", 4000) . "INSERT INTO events VALUES ('second')");
+
+        self::assertSame(
+            [['name' => 'first'], ['name' => 'second']],
+            \iterator_to_array($this->connection->query('SELECT name FROM events ORDER BY rowid')),
+        );
+    }
+
+    public function testRejectsSecondStatementAfterLongCommentBlock(): void
+    {
+        $this->connection->query('CREATE TABLE events (name TEXT)');
+        $this->connection->query("INSERT INTO events VALUES ('kept')");
+
+        try {
+            $this->connection->query('SELECT 1;' . \str_repeat("-- note\n", 4000) . 'DELETE FROM events');
+            self::fail('Expected the second statement to be rejected');
+        } catch (SqliteQueryError $error) {
+            self::assertSame('Only one SQL statement may be executed at a time', $error->getMessage());
+        }
+
+        self::assertSame(['name' => 'kept'], $this->connection->query('SELECT name FROM events')->fetchRow());
+    }
+
+    public function testLineCommentOnlyEndsAtNewline(): void
+    {
+        $this->connection->query('CREATE TABLE events (name TEXT)');
+
+        self::assertNotNull($this->connection->query("--x\ry\nEXPLAIN INSERT INTO events VALUES ('explained')")->fetchRow());
+        self::assertSame(0, $this->connection->query('SELECT COUNT(*) AS count FROM events')->fetchRow()['count']);
     }
 
     public function testAllowsUnterminatedTrailingBlockComment(): void
