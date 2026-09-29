@@ -85,7 +85,14 @@ final class Statement implements SqliteStatement
             }
 
             $this->lastUsedAt = \time();
-            $this->activeResult = $result->isClosed() ? null : \WeakReference::create($result);
+            $this->activeResult = null;
+            if (!$result->isClosed()) {
+                $this->activeResult = \WeakReference::create($result);
+                // Closing a statement frees its results in the worker, so the result keeps the statement alive
+                $result->onClose(function (): void {
+                    $this->lastUsedAt = \time();
+                });
+            }
 
             return $result;
         } finally {

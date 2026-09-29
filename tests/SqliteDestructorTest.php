@@ -19,6 +19,7 @@ use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnectionPool;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteLink;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -224,6 +225,38 @@ final class SqliteDestructorTest extends TestCase
         $transaction->commit();
 
         self::assertSame(['answer' => 42], $this->pool->query('SELECT 42 AS answer')->fetchRow());
+    }
+
+    /**
+     * @param \Closure(SqliteConnection, SqliteConnectionPool):SqliteLink $open
+     */
+    #[DataProvider('provideLinks')]
+    public function testResultOfADroppedStatementCanBeFullyRead(\Closure $open): void
+    {
+        $link = $open($this->connection, $this->pool);
+
+        $fetched = [];
+        $result = $link->prepare('SELECT rowid FROM entries')->execute();
+        while (($row = $result->fetchRow()) !== null) {
+            $fetched[] = $row['rowid'];
+        }
+        $iterated = [];
+        foreach ($link->prepare('SELECT rowid FROM entries')->execute() as $row) {
+            $iterated[] = $row['rowid'];
+        }
+        if ($link instanceof SqliteTransaction) {
+            $link->commit();
+        }
+
+        self::assertSame([1, 2, 3], $fetched);
+        self::assertSame([1, 2, 3], $iterated);
+    }
+
+    public static function provideLinks(): iterable
+    {
+        yield 'connection' => [static fn (SqliteConnection $connection): SqliteLink => $connection];
+        yield 'transaction' => [static fn (SqliteConnection $connection): SqliteLink => $connection->beginTransaction()];
+        yield 'pooled transaction' => [static fn (SqliteConnection $connection, SqliteConnectionPool $pool): SqliteLink => $pool->beginTransaction()];
     }
 
     public function testCollectingATransactionTogetherWithItsNestedTransaction(): void
