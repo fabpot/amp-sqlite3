@@ -103,6 +103,7 @@ final class Connection implements SqliteConnection
 
     public function beginTransaction(): SqliteTransaction
     {
+        $this->assertCurrentTaskHoldsNoTransactionLease();
         $lock = $this->acquireConnectionLock();
 
         try {
@@ -269,14 +270,21 @@ final class Connection implements SqliteConnection
 
     public function executeControl(string $sql): void
     {
-        if ($this->leases->currentTaskHoldsTransactionLease()) {
-            throw new SqliteTransactionError('Close the unread results and BLOB streams of the transaction first');
-        }
-
+        $this->assertCurrentTaskHoldsNoTransactionLease();
         $this->leases->awaitTransactionIdle();
         $value = $this->requestResultPayload('execute', $sql, ['sql' => $sql, 'params' => []]);
         if ($value['result_id'] !== null) {
             $this->closeResult($value['result_id'], $sql);
+        }
+    }
+
+    /**
+     * @throws SqliteTransactionError If the current task still holds unread results or BLOB streams of the transaction
+     */
+    public function assertCurrentTaskHoldsNoTransactionLease(): void
+    {
+        if ($this->leases->currentTaskHoldsTransactionLease()) {
+            throw new SqliteTransactionError('Close the unread results and BLOB streams of the transaction first');
         }
     }
 

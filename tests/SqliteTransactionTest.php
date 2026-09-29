@@ -362,6 +362,90 @@ final class SqliteTransactionTest extends TestCase
         yield 'commit' => [static fn (SqliteTransaction $transaction) => $transaction->commit()];
         yield 'rollback' => [static fn (SqliteTransaction $transaction) => $transaction->rollback()];
         yield 'nested transaction' => [static fn (SqliteTransaction $transaction) => $transaction->beginTransaction()];
+        yield 'close' => [static fn (SqliteTransaction $transaction) => $transaction->close()];
+    }
+
+    /**
+     * @param \Closure(SqliteTransaction):mixed $finish
+     */
+    #[DataProvider('provideTransactionControlOperations')]
+    public function testRejectsTransactionControlWhileCurrentTaskHoldsUnreadResultOfDroppedNestedTransaction(\Closure $finish): void
+    {
+        self::awaitWithTimeout(function () use ($finish): void {
+            $transaction = $this->connection->beginTransaction();
+            $nested = $transaction->beginTransaction();
+            $nested->execute('INSERT INTO entries VALUES (?)', ['nested']);
+            $result = $nested->query("SELECT 'first' AS value UNION ALL SELECT 'second'");
+            unset($nested);
+            \gc_collect_cycles();
+            delay(0);
+
+            try {
+                $finish($transaction);
+                self::fail('Expected the unread result to be rejected');
+            } catch (SqliteTransactionError $error) {
+                self::assertSame('Close the unread results and BLOB streams of the transaction first', $error->getMessage());
+            }
+
+            $result->close();
+            $transaction->execute('INSERT INTO entries VALUES (?)', ['committed']);
+            $transaction->commit();
+        });
+
+        self::assertSame([['value' => 'committed']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    /**
+     * @param \Closure(SqliteTransaction):mixed $finish
+     */
+    #[DataProvider('provideTransactionControlOperations')]
+    public function testRejectsTransactionControlWhileCurrentTaskHoldsUnreadResultAndAnotherTaskWaits(\Closure $finish): void
+    {
+        self::awaitWithTimeout(function () use ($finish): void {
+            $transaction = $this->connection->beginTransaction();
+            $result = $transaction->query("SELECT 'first' AS value UNION ALL SELECT 'second'");
+            $insert = async(fn () => $transaction->execute('INSERT INTO entries VALUES (?)', ['concurrent']));
+            delay(0);
+
+            try {
+                $finish($transaction);
+                self::fail('Expected the unread result to be rejected');
+            } catch (SqliteTransactionError $error) {
+                self::assertSame('Close the unread results and BLOB streams of the transaction first', $error->getMessage());
+            }
+
+            $result->close();
+            $insert->await();
+            $transaction->commit();
+        });
+
+        self::assertSame([['value' => 'concurrent']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+    }
+
+    public function testRejectsBeginTransactionWhileCurrentTaskHoldsUnreadResultOfDroppedTransaction(): void
+    {
+        self::awaitWithTimeout(function (): void {
+            $transaction = $this->connection->beginTransaction();
+            $transaction->execute('INSERT INTO entries VALUES (?)', ['dropped']);
+            $result = $transaction->query("SELECT 'first' AS value UNION ALL SELECT 'second'");
+            unset($transaction);
+            \gc_collect_cycles();
+            delay(0);
+
+            try {
+                $this->connection->beginTransaction();
+                self::fail('Expected the unread result to be rejected');
+            } catch (SqliteTransactionError $error) {
+                self::assertSame('Close the unread results and BLOB streams of the transaction first', $error->getMessage());
+            }
+
+            $result->close();
+            $transaction = $this->connection->beginTransaction();
+            $transaction->execute('INSERT INTO entries VALUES (?)', ['committed']);
+            $transaction->commit();
+        });
+
+        self::assertSame([['value' => 'committed']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
     public function testRejectsCommitWhileCurrentTaskHoldsOpenBlob(): void
@@ -687,5 +771,13 @@ final class SqliteTransactionTest extends TestCase
 
         self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
         self::assertSame(['contents' => '0000'], $this->connection->query('SELECT hex(contents) AS contents FROM files')->fetchRow());
+    }
+
+    /**
+     * @param \Closure():void $test
+     */
+    private static function awaitWithTimeout(\Closure $test): void
+    {
+        async($test)->await(new TimeoutCancellation(5));
     }
 }

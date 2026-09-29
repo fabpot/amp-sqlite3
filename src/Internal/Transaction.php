@@ -143,6 +143,7 @@ final class Transaction implements SqliteTransaction
 
     public function beginTransaction(): SqliteTransaction
     {
+        $this->assertCurrentTaskHoldsNoLease();
         $lock = $this->stateMutex->acquire();
 
         try {
@@ -181,6 +182,7 @@ final class Transaction implements SqliteTransaction
 
     public function commit(): void
     {
+        $this->assertCurrentTaskHoldsNoLease();
         $lock = $this->stateMutex->acquire();
 
         try {
@@ -216,6 +218,7 @@ final class Transaction implements SqliteTransaction
 
     public function rollback(): void
     {
+        $this->assertCurrentTaskHoldsNoLease();
         $lock = $this->stateMutex->acquire();
 
         try {
@@ -245,6 +248,7 @@ final class Transaction implements SqliteTransaction
 
     public function close(): void
     {
+        $this->assertCurrentTaskHoldsNoLease();
         $lock = $this->stateMutex->acquire();
 
         try {
@@ -411,6 +415,13 @@ final class Transaction implements SqliteTransaction
             }
 
             return $lock;
+        }
+    }
+
+    private function assertCurrentTaskHoldsNoLease(): void
+    {
+        if ($this->isActive()) {
+            $this->connection->assertCurrentTaskHoldsNoTransactionLease();
         }
     }
 
