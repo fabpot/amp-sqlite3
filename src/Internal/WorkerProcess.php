@@ -757,6 +757,7 @@ final class WorkerProcess
         }
         try {
             $consumedSql = $statement->getSQL();
+            // @phpstan-ignore catch.neverThrown (getSQL() throws when the SQL only contains comments)
         } catch (\Error $previous) {
             throw new \RuntimeException('SQL must contain an executable statement', previous: $previous);
         }
