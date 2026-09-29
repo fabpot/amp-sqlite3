@@ -269,12 +269,27 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
     }
 
-    public function testOrderlyConnectionCloseInvalidatesBufferedResult(): void
+    public function testConnectionCloseKeepsTheRowsOfAFullyBufferedResult(): void
     {
-        $result = $this->connection->query('SELECT 1 AS value');
+        $result = $this->connection->query('SELECT 1 AS value UNION ALL SELECT 2');
 
         $this->connection->close();
 
+        self::assertSame([['value' => 1], ['value' => 2]], \iterator_to_array($result));
+        self::assertTrue($result->isClosed());
+    }
+
+    public function testConnectionCloseKeepsTheRowsBufferedFromTheLastBatch(): void
+    {
+        $result = $this->connection->query('SELECT 1 AS value UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4');
+        $result->fetchRow();
+        $result->fetchRow();
+        $result->fetchRow();
+
+        $this->connection->close();
+
+        self::assertSame(['value' => 4], $result->fetchRow());
+        self::assertNull($result->fetchRow());
         self::assertTrue($result->isClosed());
     }
 

@@ -120,6 +120,16 @@ final class Statement implements SqliteStatement
         self::dispose($this->connection, $this->statementId, $this->query, $this->activeResult, $this->onClose);
     }
 
+    public function closeOnConnectionClose(): void
+    {
+        if ($this->closed) {
+            return;
+        }
+
+        $this->closed = true;
+        self::dispose($this->connection, $this->statementId, $this->query, null, $this->onClose);
+    }
+
     public function isClosed(): bool
     {
         return $this->closed;

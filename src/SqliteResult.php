@@ -23,7 +23,7 @@ interface SqliteResult extends SqlResult, Closable
 {
     /**
      * @throws SqliteQueryError If fetching a later batch fails while executing the query.
-     * @throws SqliteConnectionException If the connection is closed or lost before the result is fully read.
+     * @throws SqliteConnectionException If the connection is closed or lost before the last batch is fetched.
      * @throws SqliteException If the result was explicitly closed.
      */
     public function fetchRow(): ?array;

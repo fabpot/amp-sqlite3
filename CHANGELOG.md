@@ -13,6 +13,7 @@
 - Throw instead of deadlocking when a fiber finishes a transaction while holding its unread results or BLOB streams
 - Keep pragma values out of child-process stack traces when a connection fails to start
 - Fail reads of results and BLOB streams interrupted by a connection close instead of silently ending them
+- Keep the rows of fully fetched results readable after their connection closes
 - Speed up repeated executions of prepared write statements by reusing their metadata until SQLite recompiles them
 - Fix INSERT statements failing on SQLite versions older than 3.33, which lack the sqlite_schema table
 - Read result rows in constant time so larger batch sizes no longer slow down iteration

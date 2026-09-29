@@ -168,6 +168,12 @@ final class Result implements SqliteResult, \IteratorAggregate
             return;
         }
 
+        if ($this->exhausted) {
+            $this->lease?->release();
+
+            return;
+        }
+
         $this->connectionClosed = true;
         $this->close();
     }

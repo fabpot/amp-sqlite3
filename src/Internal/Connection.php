@@ -635,7 +635,7 @@ final class Connection implements SqliteConnection
         }
         foreach ($this->statements as $statement => $_) {
             try {
-                $statement->close();
+                $statement->closeOnConnectionClose();
             } catch (\Throwable) {
             }
         }

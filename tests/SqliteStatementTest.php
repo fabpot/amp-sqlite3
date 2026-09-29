@@ -103,6 +103,19 @@ final class SqliteStatementTest extends TestCase
         self::assertSame(1, $resultClosed);
     }
 
+    public function testConnectionCloseKeepsTheRowsOfAFullyBufferedResult(): void
+    {
+        $statement = $this->connection->prepare('SELECT 1 AS value');
+        $result = $statement->execute();
+
+        $this->connection->close();
+        delay(0);
+
+        self::assertTrue($statement->isClosed());
+        self::assertSame(['value' => 1], $result->fetchRow());
+        self::assertNull($result->fetchRow());
+    }
+
     public function testCloseIsIdempotentAndPreventsExecution(): void
     {
         $statement = $this->connection->prepare('SELECT 1');
