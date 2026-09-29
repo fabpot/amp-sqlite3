@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
+use Amp\Closable;
 use Amp\TimeoutCancellation;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
@@ -237,5 +238,68 @@ final class SqliteDestructorTest extends TestCase
             ['answer' => 42],
             async(fn () => $this->connection->query('SELECT 42 AS answer')->fetchRow())->await(new TimeoutCancellation(5)),
         );
+    }
+
+    public function testCollectingATransactionTogetherWithItsNestedTransaction(): void
+    {
+        $cycle = new \stdClass();
+        $cycle->cycle = $cycle;
+        $cycle->transaction = $this->connection->beginTransaction();
+        $cycle->transaction->execute("INSERT INTO entries VALUES ('dropped')");
+        $cycle->nested = $cycle->transaction->beginTransaction();
+        $cycle->nested->execute("INSERT INTO entries VALUES ('dropped')");
+        unset($cycle);
+
+        \gc_collect_cycles();
+
+        $count = async(fn () => $this->connection->query("SELECT COUNT(*) AS count FROM entries WHERE value = 'dropped'")->fetchRow());
+        self::assertSame(['count' => 0], $count->await(new TimeoutCancellation(5)));
+        self::assertFalse($this->connection->isClosed());
+    }
+
+    /**
+     * @param \Closure(SqliteConnection):Closable $open
+     */
+    #[DataProvider('provideClosables')]
+    public function testResourceKeptAliveAfterItsDestructorRanIsClosed(\Closure $open): void
+    {
+        $kept = new \ArrayObject();
+        $cycle = new class($kept) {
+            public ?object $cycle = null;
+            public ?Closable $resource = null;
+
+            /**
+             * @param \ArrayObject<int, Closable|null> $kept
+             */
+            public function __construct(private readonly \ArrayObject $kept)
+            {
+            }
+
+            public function __destruct()
+            {
+                $this->kept[] = $this->resource;
+            }
+        };
+        $cycle->cycle = $cycle;
+        $cycle->resource = $open($this->connection);
+        unset($cycle);
+        \gc_collect_cycles();
+
+        $resource = $kept[0];
+        self::assertInstanceOf(Closable::class, $resource);
+        self::assertTrue($resource->isClosed());
+        $resource->close();
+        self::assertSame(
+            ['answer' => 42],
+            async(fn () => $this->connection->query('SELECT 42 AS answer')->fetchRow())->await(new TimeoutCancellation(5)),
+        );
+    }
+
+    public static function provideClosables(): iterable
+    {
+        yield 'unread result' => [static fn (SqliteConnection $connection): Closable => $connection->query('SELECT value FROM entries')];
+        yield 'statement' => [static fn (SqliteConnection $connection): Closable => $connection->prepare('SELECT value FROM entries')];
+        yield 'BLOB stream' => [static fn (SqliteConnection $connection): Closable => $connection->openBlob('entries', 'value', 3)];
+        yield 'transaction' => [static fn (SqliteConnection $connection): Closable => $connection->beginTransaction()];
     }
 }

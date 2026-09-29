@@ -68,6 +68,7 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
             return;
         }
 
+        $this->closed = true;
         EventLoop::queue(self::dispose(...), $this->close, $this->onClose);
     }
 

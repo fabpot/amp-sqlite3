@@ -80,6 +80,7 @@ final class Transaction implements SqliteTransaction
             return;
         }
 
+        $this->active = false;
         EventLoop::queue(
             self::rollbackDropped(...),
             $this->connection,
@@ -299,10 +300,7 @@ final class Transaction implements SqliteTransaction
         $nested?->releaseOnConnectionClose();
     }
 
-    /**
-     * @param self|null $transaction Null for a nested transaction that was dropped
-     */
-    private function releaseNested(?self $transaction): void
+    private function releaseNested(self $transaction): void
     {
         if ($this->activeNested?->get() === $transaction) {
             $this->activeNested = null;
@@ -348,6 +346,13 @@ final class Transaction implements SqliteTransaction
         }
     }
 
+    private function releaseDroppedNested(): void
+    {
+        $this->activeNested = null;
+        $this->nestedBusy?->complete();
+        $this->nestedBusy = null;
+    }
+
     /**
      * @param \WeakMap<Statement, true> $statements
      * @param DeferredFuture<null> $onRollback
@@ -362,7 +367,8 @@ final class Transaction implements SqliteTransaction
         DeferredFuture $onClose,
     ): void {
         try {
-            if (!$connection->isClosed()) {
+            // A dropped parent rolls back the savepoint of its nested transaction too
+            if (!$connection->isClosed() && ($parent === null || $parent->isActive())) {
                 if ($savepoint === null) {
                     $connection->executeControl('ROLLBACK');
                 } else {
@@ -377,21 +383,21 @@ final class Transaction implements SqliteTransaction
             $connection->close();
         } finally {
             self::closeTrackedStatements($statements);
-            $parent?->releaseNested(null);
+            $parent?->releaseDroppedNested();
             $onRollback->complete();
             $onClose->complete();
             if ($savepoint === null) {
-                $connection->releaseTransaction(null);
+                $connection->releaseDroppedTransaction();
             }
         }
     }
 
     /**
-     * Waits for a dropped nested transaction to be rolled back in the background.
+     * Waits for the background rollback of a dropped nested transaction; callers reject an active one first.
      */
     private function awaitDroppedNestedTransaction(): void
     {
-        while ($this->nestedBusy !== null && $this->activeNested?->get() === null) {
+        while ($this->nestedBusy !== null) {
             $this->nestedBusy->getFuture()->await();
         }
     }

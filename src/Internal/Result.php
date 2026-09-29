@@ -73,6 +73,8 @@ final class Result implements SqliteResult, \IteratorAggregate
             return;
         }
 
+        $this->closed = true;
+        $this->explicitlyClosed = true;
         EventLoop::queue(self::dispose(...), $this->resultId, $this->close, $this->lease, $this->onClose);
     }
 

@@ -280,13 +280,18 @@ final class Connection implements SqliteConnection
         }
     }
 
-    public function releaseTransaction(?Transaction $transaction): void
+    public function releaseTransaction(Transaction $transaction): void
     {
         $active = $this->activeTransaction?->get();
         if ($active !== null && $active !== $transaction) {
             return;
         }
 
+        $this->releaseDroppedTransaction();
+    }
+
+    public function releaseDroppedTransaction(): void
+    {
         $this->activeTransaction = null;
         $this->leases->releaseTransactionLock();
     }

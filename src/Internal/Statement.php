@@ -55,6 +55,8 @@ final class Statement implements SqliteStatement
             return;
         }
 
+        $this->closed = true;
+        $this->transaction = null;
         EventLoop::queue(self::dispose(...), $this->connection, $this->statementId, $this->query, $this->activeResult, $this->onClose);
     }
 
