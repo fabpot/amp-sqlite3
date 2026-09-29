@@ -240,7 +240,7 @@ $nested->rollback();
 $transaction->commit();
 ```
 
-Close unread results and BLOB streams before committing, rolling back, or starting a nested transaction. The fiber that opened them gets a `SqliteTransactionError`; other fibers wait until they are closed. Use `onCommit()` and `onRollback()` to register callbacks that should run after the top-level outcome is known.
+Close unread results and BLOB streams before committing, rolling back, or starting another transaction. The fiber that opened them gets a `SqliteTransactionError`; other fibers wait until they are closed. Use `onCommit()` and `onRollback()` to register callbacks that should run after the top-level outcome is known.
 
 ## BLOB values
 

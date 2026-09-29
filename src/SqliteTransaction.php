@@ -28,5 +28,19 @@ interface SqliteTransaction extends SqliteLink, SqlTransaction
      */
     public function commit(): void;
 
+    /**
+     * @throws SqliteTransactionError If the transaction is inactive, has an active nested transaction, or has unread results
+     *                                 or open BLOB streams owned by the current fiber.
+     * @throws SqliteConnectionException If the connection is lost while rolling back.
+     */
+    public function rollback(): void;
+
+    /**
+     * @throws SqliteTransactionError If the transaction is inactive, has an active nested transaction, or has unread results
+     *                                 or open BLOB streams owned by the current fiber.
+     * @throws SqliteConnectionException If the connection is lost while creating the savepoint.
+     */
+    public function beginTransaction(): SqliteTransaction;
+
     public function getIsolation(): SqliteTransactionMode;
 }

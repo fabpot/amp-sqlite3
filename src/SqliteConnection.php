@@ -21,6 +21,12 @@ use Amp\Sql\SqlTransactionIsolation;
  */
 interface SqliteConnection extends SqliteLink, SqlConnection
 {
+    /**
+     * @throws SqliteTransactionError If the current fiber owns unread results or open BLOB streams of the active transaction.
+     * @throws SqliteConnectionException If the connection is closed or lost while beginning the transaction.
+     */
+    public function beginTransaction(): SqliteTransaction;
+
     public function getConfig(): SqliteConfig;
 
     public function getTransactionIsolation(): SqliteTransactionMode;
