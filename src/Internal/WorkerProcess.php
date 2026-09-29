@@ -586,7 +586,6 @@ final class WorkerProcess
      */
     private function execute(array $request, ?int $statementId = null): array
     {
-        $before = $this->totalChanges();
         $lastInsertIdBefore = $this->database->lastInsertRowID();
         if ($statementId !== null) {
             if (!isset($this->statements[$statementId])) {
@@ -622,7 +621,7 @@ final class WorkerProcess
         ];
 
         if ($columns === 0) {
-            $value['row_count'] = $this->totalChanges() - $before;
+            $value['row_count'] = self::isDml($statement) ? $this->database->changes() : 0;
             $value['last_insert_id'] = $this->detectLastInsertId($statement, $lastInsertIdBefore);
             $nativeResult->finalize();
             if ($statementId === null) {
@@ -909,10 +908,12 @@ final class WorkerProcess
         return false;
     }
 
-    private function totalChanges(): int
+    /**
+     * SQLite only resets changes() for DML, so other statements would report the previous DML count.
+     */
+    private static function isDml(\SQLite3Stmt $statement): bool
     {
-        /** @var int */
-        return $this->queryInternal('SELECT total_changes()');
+        return SqlStatementBoundary::startsWithKeyword($statement->getSQL(), 'INSERT', 'REPLACE', 'UPDATE', 'DELETE', 'WITH');
     }
 
     private function queryInternal(string $sql): mixed

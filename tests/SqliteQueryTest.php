@@ -797,15 +797,53 @@ final class SqliteQueryTest extends TestCase
         self::assertNull($result->fetchRow());
     }
 
-    public function testCommandRowCountIncludesTriggerChanges(): void
+    public function testCommandRowCountExcludesTriggerChanges(): void
     {
         $this->connection->query('CREATE TABLE source (value INTEGER)');
         $this->connection->query('CREATE TABLE target (value INTEGER)');
-        $this->connection->query('CREATE TRIGGER copy AFTER INSERT ON source BEGIN INSERT INTO target VALUES (NEW.value); END');
+        $this->connection->query('CREATE TRIGGER copy AFTER INSERT ON source BEGIN INSERT INTO target VALUES (NEW.value); INSERT INTO target VALUES (NEW.value); END');
 
-        $result = $this->connection->query('INSERT INTO source VALUES (1)');
+        $result = $this->connection->query('INSERT INTO source VALUES (1), (2)');
 
         self::assertSame(2, $result->getRowCount());
+    }
+
+    public function testCommandRowCountExcludesVirtualTableInternalChanges(): void
+    {
+        $this->connection->executeScript(<<<'SQL'
+            CREATE TABLE posts (id INTEGER PRIMARY KEY, body TEXT);
+            CREATE VIRTUAL TABLE posts_fts USING fts5(body, content='posts', content_rowid='id');
+            CREATE TRIGGER posts_ai AFTER INSERT ON posts BEGIN INSERT INTO posts_fts (rowid, body) VALUES (NEW.id, NEW.body); END;
+            SQL);
+
+        self::assertSame(1, $this->connection->execute('INSERT INTO posts (body) VALUES (?)', ['hello'])->getRowCount());
+        self::assertSame(1, $this->connection->query("INSERT INTO posts_fts (rowid, body) VALUES (99, 'direct')")->getRowCount());
+        self::assertSame(0, $this->connection->query('CREATE VIRTUAL TABLE other_fts USING fts5(body)')->getRowCount());
+    }
+
+    public function testCommandRowCountIsZeroForStatementsAfterDml(): void
+    {
+        $this->connection->query('CREATE TABLE entries (value INTEGER)');
+        $this->connection->query('INSERT INTO entries VALUES (1), (2), (3)');
+
+        self::assertSame(0, $this->connection->query('CREATE TABLE copy AS SELECT * FROM entries')->getRowCount());
+        self::assertSame(0, $this->connection->query('ANALYZE')->getRowCount());
+        self::assertSame(0, $this->connection->query('PRAGMA user_version = 3')->getRowCount());
+    }
+
+    public function testCommandRowCountCountsDmlPrefixedByCommentsOrCommonTableExpressions(): void
+    {
+        $this->connection->query('CREATE TABLE entries (value INTEGER)');
+        $this->connection->query('INSERT INTO entries VALUES (1), (2), (3)');
+
+        self::assertSame(2, $this->connection->query('/* cleanup */ WITH old AS (SELECT 1) DELETE FROM entries WHERE value > 1')->getRowCount());
+        self::assertSame(0, $this->connection->query('CREATE TABLE other (value INTEGER)')->getRowCount());
+
+        $update = $this->connection->prepare('UPDATE entries SET value = value + 1');
+        self::assertSame(1, $update->execute()->getRowCount());
+        $this->connection->query('CREATE TABLE another (value INTEGER)');
+        self::assertSame(1, $update->execute()->getRowCount());
+        self::assertSame(0, $this->connection->query("DELETE FROM entries WHERE value < 0")->getRowCount());
     }
 
     public function testReportsPrimaryAndExtendedResultCodes(): void

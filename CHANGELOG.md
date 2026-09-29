@@ -2,6 +2,7 @@
 
 ## 1.1.0
 
+- Count only rows changed directly by INSERT, UPDATE, and DELETE statements, excluding trigger and virtual table changes
 - Fix pooled results losing their last row and holding their connection when read with fetchRow()
 - Roll back abandoned nested transactions instead of blocking their parent transaction
 - Roll back abandoned transactions even while their prepared statements are still referenced

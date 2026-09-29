@@ -174,7 +174,7 @@ $result = $database->execute(
     ['Alice'],
 );
 
-$result->getRowCount();     // changed rows, including trigger changes
+$result->getRowCount();     // rows changed by an INSERT, UPDATE, or DELETE, excluding trigger changes
 $result->getLastInsertId(); // inserted row ID, or null when no ID can be attributed
 $result->getColumnCount();  // null for commands
 $result->getColumnNames();  // null for commands
