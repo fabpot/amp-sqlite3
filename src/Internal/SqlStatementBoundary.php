@@ -36,7 +36,7 @@ final class SqlStatementBoundary
 
     /**
      * Mirrors SQLite's tokenizer: whitespace starts with a space, tab, newline, form feed, or carriage return and may
-     * then include vertical tabs, a line comment only ends at a newline, and a lone trailing "/*" is not a comment.
+     * then include vertical tabs, and a line comment only ends at a newline.
      */
     private static function insignificantLength(string $sql): int
     {
@@ -52,7 +52,7 @@ final class SqlStatementBoundary
             } elseif ($char === '-' && ($sql[$offset + 1] ?? '') === '-') {
                 $end = \strpos($sql, "\n", $offset + 2);
                 $offset = $end === false ? $length : $end;
-            } elseif ($char === '/' && ($sql[$offset + 1] ?? '') === '*' && $offset + 2 < $length) {
+            } elseif ($char === '/' && ($sql[$offset + 1] ?? '') === '*') {
                 $end = \strpos($sql, '*/', $offset + 2);
                 $offset = $end === false ? $length : $end + 2;
             } else {

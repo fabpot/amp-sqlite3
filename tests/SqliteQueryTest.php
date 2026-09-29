@@ -202,6 +202,7 @@ final class SqliteQueryTest extends TestCase
     public function testAllowsUnterminatedTrailingBlockComment(): void
     {
         self::assertSame([1 => 1], $this->connection->query('SELECT 1; /* trailing')->fetchRow());
+        self::assertSame([1 => 1], $this->connection->query('SELECT 1; /*')->fetchRow());
     }
 
     public function testStreamsRowsAcrossBatches(): void
