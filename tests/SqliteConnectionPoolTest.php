@@ -555,6 +555,25 @@ final class SqliteConnectionPoolTest extends TestCase
         }
     }
 
+    public function testDroppingAnUnreadPreparedStatementResultReleasesTheConnection(): void
+    {
+        $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize(1), maxConnections: 1);
+
+        try {
+            $pool->query("INSERT INTO entries VALUES ('a'), ('b'), ('c')");
+            $statement = $pool->prepare('SELECT value FROM entries');
+            $statement->execute();
+
+            for ($attempt = 0; $attempt < 500 && $pool->getIdleConnectionCount() === 0; ++$attempt) {
+                delay(0.01);
+            }
+
+            self::assertSame(1, $pool->getIdleConnectionCount());
+        } finally {
+            $pool->close();
+        }
+    }
+
     public function testPooledFetchAfterPoolCloseFailsAndResultCanStillBeClosed(): void
     {
         $pool = new SqliteConnectionPool((new SqliteConfig($this->path))->withBatchSize(1));
