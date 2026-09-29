@@ -799,16 +799,18 @@ final class WorkerProcess
     private function executeStatement(\SQLite3Stmt $statement): \SQLite3Result
     {
         $authorizations = $this->authorizations;
-        $result = $statement->execute();
+        try {
+            $result = $statement->execute();
+        } finally {
+            // A recompilation may change the insert target and cannot be told apart from statements virtual tables prepare
+            $info = $this->statementInfo[$statement] ?? null;
+            if ($info !== null && $this->authorizations !== $authorizations) {
+                $info['stale'] = true;
+                $this->statementInfo[$statement] = $info;
+            }
+        }
         if ($result === false) {
             throw new \RuntimeException('Could not execute SQLite statement');
-        }
-
-        // A recompilation may change the insert target and cannot be told apart from statements virtual tables prepare
-        $info = $this->statementInfo[$statement] ?? null;
-        if ($info !== null && $this->authorizations !== $authorizations) {
-            $info['stale'] = true;
-            $this->statementInfo[$statement] = $info;
         }
 
         return $result;

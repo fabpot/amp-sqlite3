@@ -636,6 +636,21 @@ final class SqliteQueryTest extends TestCase
         self::assertSame([['value' => 'main']], \iterator_to_array($this->connection->query('SELECT value FROM main.entries')));
     }
 
+    public function testPreparedInsertKeepsMetadataRecompiledByFailedExecution(): void
+    {
+        $this->connection->query('CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT)');
+        $statement = $this->connection->prepare('INSERT INTO entries (value) VALUES (?)');
+        $this->connection->query('CREATE TEMP TABLE entries (value TEXT NOT NULL PRIMARY KEY) WITHOUT ROWID');
+
+        try {
+            $statement->execute([null]);
+            self::fail('Expected the NOT NULL constraint to fail');
+        } catch (SqliteQueryError) {
+        }
+
+        self::assertNull($statement->execute(['temporary'])->getLastInsertId());
+    }
+
     public function testRejectsRowProducingDmlAfterEmptyStatement(): void
     {
         $this->connection->query('CREATE TABLE entries (id INTEGER PRIMARY KEY)');
