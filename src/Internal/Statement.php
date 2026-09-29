@@ -75,7 +75,7 @@ final class Statement implements SqliteStatement
 
         try {
             $this->activeResult?->close();
-            $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $transaction, $this);
+            $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $transaction !== null, $this);
             if ($this->isClosed()) {
                 $result->close();
 

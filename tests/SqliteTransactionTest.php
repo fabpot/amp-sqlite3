@@ -15,6 +15,7 @@ namespace Fabpot\Amp\Sqlite\Test;
 
 use Amp\Sql\SqlTransactionIsolationLevel;
 use Amp\TimeoutCancellation;
+use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnector;
@@ -301,19 +302,19 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame([['value' => 'after result']], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
-    public function testActiveResultKeepsTransactionAlive(): void
+    public function testDroppedTransactionRollsBackOnlyAfterItsActiveResultIsClosed(): void
     {
         $transaction = $this->connection->beginTransaction();
-        $result = $transaction->query("SELECT 'first' AS value UNION ALL SELECT 'second'");
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['dropped']);
+        $result = $transaction->query("SELECT 'first' AS value UNION ALL SELECT 'second' UNION ALL SELECT 'third'");
         unset($transaction);
         \gc_collect_cycles();
+        delay(0);
 
-        self::assertSame(['value' => 'first'], $result->fetchRow());
-        $result->close();
+        self::assertSame(['first', 'second', 'third'], \array_column(\iterator_to_array($result), 'value'));
         unset($result);
-        \gc_collect_cycles();
 
-        self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
+        self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
     public function testConcurrentTransactionalQueriesSerializeWithoutLosingWakeups(): void
@@ -669,20 +670,22 @@ final class SqliteTransactionTest extends TestCase
         self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
     }
 
-    public function testActiveBlobKeepsTransactionAlive(): void
+    public function testDroppedTransactionRollsBackOnlyAfterItsActiveBlobIsClosed(): void
     {
         $this->connection->query('CREATE TABLE files (contents BLOB)');
-        $this->connection->query('INSERT INTO files VALUES (zeroblob(1))');
+        $this->connection->query('INSERT INTO files VALUES (zeroblob(2))');
         $transaction = $this->connection->beginTransaction();
-        $blob = $transaction->openBlob('files', 'contents', 1);
+        $transaction->execute('INSERT INTO entries VALUES (?)', ['dropped']);
+        $blob = $transaction->openBlob('files', 'contents', 1, mode: SqliteBlobMode::ReadWrite);
         unset($transaction);
         \gc_collect_cycles();
+        delay(0);
 
-        self::assertSame("\0", $blob->read());
+        $blob->write('ab');
         $blob->close();
         unset($blob);
-        \gc_collect_cycles();
 
-        self::assertSame(['answer' => 42], $this->connection->query('SELECT 42 AS answer')->fetchRow());
+        self::assertSame([], \iterator_to_array($this->connection->query('SELECT value FROM entries')));
+        self::assertSame(['contents' => '0000'], $this->connection->query('SELECT hex(contents) AS contents FROM files')->fetchRow());
     }
 }

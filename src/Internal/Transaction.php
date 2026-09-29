@@ -96,7 +96,7 @@ final class Transaction implements SqliteTransaction
         $lock = $this->acquireOperation();
 
         try {
-            return $this->connection->queryInTransaction($sql, $this);
+            return $this->connection->queryInTransaction($sql);
         } finally {
             $lock->release();
         }
@@ -112,7 +112,7 @@ final class Transaction implements SqliteTransaction
         $lock = $this->acquireOperation();
 
         try {
-            return $this->connection->openBlobInTransaction($table, $column, $rowId, $database, $mode, $this);
+            return $this->connection->openBlobInTransaction($table, $column, $rowId, $database, $mode);
         } finally {
             $lock->release();
         }
@@ -141,7 +141,7 @@ final class Transaction implements SqliteTransaction
         $lock = $this->acquireOperation();
 
         try {
-            return $this->connection->executeInTransaction($sql, $params, $this);
+            return $this->connection->executeInTransaction($sql, $params);
         } finally {
             $lock->release();
         }
