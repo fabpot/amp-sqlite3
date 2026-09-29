@@ -21,11 +21,13 @@ use Amp\Sync\Lock;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteBlobStream;
+use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
+use Revolt\EventLoop;
 
 /** @internal */
 final class Transaction implements SqliteTransaction
@@ -68,7 +70,25 @@ final class Transaction implements SqliteTransaction
 
     public function __destruct()
     {
-        $this->close();
+        if (!$this->active) {
+            return;
+        }
+
+        if ($this->connection->isClosed()) {
+            $this->releaseOnConnectionClose();
+
+            return;
+        }
+
+        EventLoop::queue(
+            self::rollbackDropped(...),
+            $this->connection,
+            $this->parent,
+            $this->savepoint,
+            $this->statements,
+            $this->onRollback,
+            $this->onClose,
+        );
     }
 
     public function query(string $sql): SqliteResult
@@ -136,6 +156,7 @@ final class Transaction implements SqliteTransaction
                 throw new SqliteTransactionError('The transaction has been committed or rolled back');
             }
             $this->assertNoActiveNestedTransaction();
+            $this->awaitDroppedNestedTransaction();
 
             $savepoint = 'amp_sqlite_' . $this->nextSavepointId++;
             $this->connection->executeControl("SAVEPOINT {$savepoint}");
@@ -170,6 +191,7 @@ final class Transaction implements SqliteTransaction
 
         try {
             $this->assertNoActiveNestedTransaction();
+            $this->awaitDroppedNestedTransaction();
             $this->assertActive();
             $this->connection->executeControl($this->savepoint === null ? 'COMMIT' : "RELEASE SAVEPOINT {$this->savepoint}");
             $this->active = false;
@@ -204,6 +226,7 @@ final class Transaction implements SqliteTransaction
 
         try {
             $this->assertNoActiveNestedTransaction();
+            $this->awaitDroppedNestedTransaction();
             $this->assertActive();
             $this->rollbackActive();
         } finally {
@@ -245,6 +268,7 @@ final class Transaction implements SqliteTransaction
             }
 
             $this->activeNested?->get()?->close();
+            $this->awaitDroppedNestedTransaction();
             $this->rollbackActive();
         } finally {
             $lock->release();
@@ -275,7 +299,10 @@ final class Transaction implements SqliteTransaction
         $nested?->releaseOnConnectionClose();
     }
 
-    private function releaseNested(self $transaction): void
+    /**
+     * @param self|null $transaction Null for a nested transaction that was dropped
+     */
+    private function releaseNested(?self $transaction): void
     {
         if ($this->activeNested?->get() === $transaction) {
             $this->activeNested = null;
@@ -305,11 +332,67 @@ final class Transaction implements SqliteTransaction
 
     private function closeStatements(): void
     {
-        foreach ($this->statements as $statement => $_) {
+        self::closeTrackedStatements($this->statements);
+    }
+
+    /**
+     * @param \WeakMap<Statement, true> $statements
+     */
+    private static function closeTrackedStatements(\WeakMap $statements): void
+    {
+        foreach ($statements as $statement => $_) {
             try {
                 $statement->close();
             } catch (\Throwable) {
             }
+        }
+    }
+
+    /**
+     * @param \WeakMap<Statement, true> $statements
+     * @param DeferredFuture<null> $onRollback
+     * @param DeferredFuture<null> $onClose
+     */
+    private static function rollbackDropped(
+        Connection $connection,
+        ?self $parent,
+        ?string $savepoint,
+        \WeakMap $statements,
+        DeferredFuture $onRollback,
+        DeferredFuture $onClose,
+    ): void {
+        try {
+            if (!$connection->isClosed()) {
+                if ($savepoint === null) {
+                    $connection->executeControl('ROLLBACK');
+                } else {
+                    $connection->executeControl("ROLLBACK TO SAVEPOINT {$savepoint}");
+                    $connection->executeControl("RELEASE SAVEPOINT {$savepoint}");
+                }
+            }
+        } catch (SqliteConnectionException) {
+            // Rolling back on a closed connection is a no-op
+        } catch (\Throwable) {
+            // The transaction may still be open, so the connection must not be reused
+            $connection->close();
+        } finally {
+            self::closeTrackedStatements($statements);
+            $parent?->releaseNested(null);
+            $onRollback->complete();
+            $onClose->complete();
+            if ($savepoint === null) {
+                $connection->releaseTransaction(null);
+            }
+        }
+    }
+
+    /**
+     * Waits for a dropped nested transaction to be rolled back in the background.
+     */
+    private function awaitDroppedNestedTransaction(): void
+    {
+        while ($this->nestedBusy !== null && $this->activeNested?->get() === null) {
+            $this->nestedBusy->getFuture()->await();
         }
     }
 

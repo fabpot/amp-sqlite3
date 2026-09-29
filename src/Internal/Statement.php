@@ -21,6 +21,7 @@ use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
 use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
+use Revolt\EventLoop;
 
 /** @internal */
 final class Statement implements SqliteStatement
@@ -49,7 +50,11 @@ final class Statement implements SqliteStatement
 
     public function __destruct()
     {
-        $this->close();
+        if ($this->closed) {
+            return;
+        }
+
+        EventLoop::queue(self::dispose(...), $this->connection, $this->statementId, $this->query, $this->activeResult, $this->onClose);
     }
 
     /**
@@ -108,16 +113,8 @@ final class Statement implements SqliteStatement
         }
 
         $this->closed = true;
-        try {
-            $this->activeResult?->close();
-        } finally {
-            try {
-                $this->connection->closeStatement($this->statementId, $this->query);
-            } finally {
-                $this->transaction = null;
-                $this->onClose->complete();
-            }
-        }
+        $this->transaction = null;
+        self::dispose($this->connection, $this->statementId, $this->query, $this->activeResult, $this->onClose);
     }
 
     public function isClosed(): bool
@@ -128,5 +125,21 @@ final class Statement implements SqliteStatement
     public function onClose(\Closure $onClose): void
     {
         $this->onClose->getFuture()->finally($onClose);
+    }
+
+    /**
+     * @param DeferredFuture<null> $onClose
+     */
+    private static function dispose(Connection $connection, int $statementId, string $query, ?SqliteResult $activeResult, DeferredFuture $onClose): void
+    {
+        try {
+            $activeResult?->close();
+        } finally {
+            try {
+                $connection->closeStatement($statementId, $query);
+            } finally {
+                $onClose->complete();
+            }
+        }
     }
 }

@@ -24,6 +24,7 @@ use Amp\ForbidSerialization;
 use Fabpot\Amp\Sqlite\SqliteBlobMode;
 use Fabpot\Amp\Sqlite\SqliteBlobStream;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
+use Revolt\EventLoop;
 
 /**
  * @internal
@@ -66,7 +67,11 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
 
     public function __destruct()
     {
-        $this->close();
+        if ($this->closed) {
+            return;
+        }
+
+        EventLoop::queue(self::dispose(...), $this->close, $this->onClose);
     }
 
     public function read(?Cancellation $cancellation = null): ?string
@@ -171,12 +176,11 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
 
         $this->closed = true;
         try {
-            ($this->close)();
+            self::dispose($this->close, $this->onClose);
         } finally {
             if ($this->transaction !== null) {
                 $this->transaction = null;
             }
-            $this->onClose->complete();
         }
     }
 
@@ -198,5 +202,18 @@ final class BlobStream implements SqliteBlobStream, \IteratorAggregate
     public function onClose(\Closure $onClose): void
     {
         $this->onClose->getFuture()->finally($onClose);
+    }
+
+    /**
+     * @param \Closure():void $close
+     * @param DeferredFuture<null> $onClose
+     */
+    private static function dispose(\Closure $close, DeferredFuture $onClose): void
+    {
+        try {
+            $close();
+        } finally {
+            $onClose->complete();
+        }
     }
 }

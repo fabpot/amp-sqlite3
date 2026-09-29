@@ -21,6 +21,7 @@ use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteException;
 use Fabpot\Amp\Sqlite\SqliteResult;
+use Revolt\EventLoop;
 
 /**
  * @internal
@@ -71,7 +72,11 @@ final class Result implements SqliteResult, \IteratorAggregate
 
     public function __destruct()
     {
-        $this->close();
+        if ($this->closed) {
+            return;
+        }
+
+        EventLoop::queue(self::dispose(...), $this->resultId, $this->close, $this->lease, $this->onClose);
     }
 
     public function fetchRow(): ?array
@@ -201,6 +206,22 @@ final class Result implements SqliteResult, \IteratorAggregate
         $this->exhausted = $batch['exhausted'];
         if ($this->exhausted && $this->rows === []) {
             $this->finish();
+        }
+    }
+
+    /**
+     * @param null|\Closure(int):void $close
+     * @param DeferredFuture<null> $onClose
+     */
+    private static function dispose(?int $resultId, ?\Closure $close, ?Lock $lease, DeferredFuture $onClose): void
+    {
+        try {
+            if ($resultId !== null && $close !== null) {
+                $close($resultId);
+            }
+        } finally {
+            $lease?->release();
+            $onClose->complete();
         }
     }
 

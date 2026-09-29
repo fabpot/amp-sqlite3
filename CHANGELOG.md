@@ -18,6 +18,8 @@
 - Speed up direct INSERT queries by caching whether each target table has rowids until its schema changes
 - Speed up direct INSERT, UPDATE, and DELETE queries by caching whether their SQL produces rows
 - Return pooled connections and prepared statements to the pool as soon as their result is read or closed
+- Fix a fatal error at shutdown when connections, results, statements, or transactions were still alive
+- Clean up dropped connections, results, statements, BLOB streams, and transactions from the event loop instead of blocking in their destructor
 
 ## 1.0.0
 

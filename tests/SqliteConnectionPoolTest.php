@@ -311,10 +311,11 @@ final class SqliteConnectionPoolTest extends TestCase
         try {
             $statement = $pool->beginTransaction()->prepare('SELECT 1');
             unset($statement);
-            delay(0);
 
-            self::assertSame(1, $pool->getIdleConnectionCount());
-            self::assertSame(['answer' => 42], $pool->query('SELECT 42 AS answer')->fetchRow());
+            self::assertSame(
+                ['answer' => 42],
+                async(fn () => $pool->query('SELECT 42 AS answer')->fetchRow())->await(new TimeoutCancellation(5)),
+            );
         } finally {
             $pool->close();
         }

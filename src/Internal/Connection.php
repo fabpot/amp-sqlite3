@@ -30,6 +30,7 @@ use Fabpot\Amp\Sqlite\SqliteStatement;
 use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use Fabpot\Amp\Sqlite\SqliteTransactionMode;
+use Revolt\EventLoop;
 
 /** @internal */
 final class Connection implements SqliteConnection
@@ -74,7 +75,12 @@ final class Connection implements SqliteConnection
 
     public function __destruct()
     {
-        $this->close();
+        if ($this->closed) {
+            return;
+        }
+
+        $this->closed = true;
+        EventLoop::queue(self::closeChannel(...), $this->channel, $this->onClose);
     }
 
     public function query(string $sql): SqliteResult
@@ -276,7 +282,7 @@ final class Connection implements SqliteConnection
         }
     }
 
-    public function releaseTransaction(Transaction $transaction): void
+    public function releaseTransaction(?Transaction $transaction): void
     {
         $active = $this->activeTransaction?->get();
         if ($active !== null && $active !== $transaction) {
@@ -619,6 +625,22 @@ final class Connection implements SqliteConnection
             try {
                 $statement->close();
             } catch (\Throwable) {
+            }
+        }
+    }
+
+    /**
+     * @param DeferredFuture<null> $onClose
+     */
+    private static function closeChannel(WorkerChannel $channel, DeferredFuture $onClose): void
+    {
+        try {
+            $channel->close();
+        } catch (WorkerFailure) {
+            $channel->kill();
+        } finally {
+            if (!$onClose->isComplete()) {
+                $onClose->complete();
             }
         }
     }

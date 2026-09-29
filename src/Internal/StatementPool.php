@@ -69,7 +69,12 @@ final class StatementPool implements SqliteStatement
 
     public function __destruct()
     {
-        $this->close();
+        if ($this->onClose->isComplete()) {
+            return;
+        }
+
+        $this->onClose->complete();
+        EventLoop::queue(self::closeStatements(...), $this->statements);
     }
 
     /**
@@ -111,9 +116,7 @@ final class StatementPool implements SqliteStatement
         }
 
         $this->onClose->complete();
-        while (!$this->statements->isEmpty()) {
-            $this->statements->dequeue()->close();
-        }
+        self::closeStatements($this->statements);
     }
 
     public function isClosed(): bool
@@ -124,6 +127,16 @@ final class StatementPool implements SqliteStatement
     public function onClose(\Closure $onClose): void
     {
         $this->onClose->getFuture()->finally($onClose);
+    }
+
+    /**
+     * @param \SplQueue<SqliteStatement> $statements
+     */
+    private static function closeStatements(\SplQueue $statements): void
+    {
+        while (!$statements->isEmpty()) {
+            $statements->dequeue()->close();
+        }
     }
 
     private function push(SqliteStatement $statement): void
