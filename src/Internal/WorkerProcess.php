@@ -46,6 +46,7 @@ final class WorkerProcess
     /** @var \WeakMap<\SQLite3Stmt, SqliteStatementInfo> */
     private \WeakMap $statementInfo;
 
+    private int $authorizations = 0;
     private bool $capturingMetadata = false;
     /** @var SqliteStatementMetadata|null */
     private ?array $capturedMetadata = null;
@@ -779,7 +780,7 @@ final class WorkerProcess
             throw $exception;
         }
 
-        $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $writes];
+        $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $writes, 'stale' => false];
 
         return $statement;
     }
@@ -797,18 +798,41 @@ final class WorkerProcess
 
     private function executeStatement(\SQLite3Stmt $statement): \SQLite3Result
     {
-        // SQLite recompiles an expired statement while executing it, which may change what it inserts into
-        [$result, $metadata] = $this->captureMetadata(static fn (): \SQLite3Result|false => $statement->execute());
+        $authorizations = $this->authorizations;
+        $result = $statement->execute();
         if ($result === false) {
             throw new \RuntimeException('Could not execute SQLite statement');
         }
 
+        // A recompilation may change the insert target and cannot be told apart from statements virtual tables prepare
         $info = $this->statementInfo[$statement] ?? null;
-        if ($metadata !== null && $info !== null) {
-            $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $info['writes']];
+        if ($info !== null && $this->authorizations !== $authorizations) {
+            $info['stale'] = true;
+            $this->statementInfo[$statement] = $info;
         }
 
         return $result;
+    }
+
+    /**
+     * @return SqliteStatementMetadata|null
+     */
+    private function refreshMetadata(\SQLite3Stmt $statement, bool $writes): ?array
+    {
+        try {
+            [$copy, $metadata] = $this->captureMetadata(fn (): \SQLite3Stmt|false => $this->database->prepare($statement->getSQL()));
+        } catch (\SQLite3Exception) {
+            return null;
+        }
+        if (!$copy) {
+            return null;
+        }
+        $copy->close();
+
+        $metadata ??= self::emptyMetadata();
+        $this->statementInfo[$statement] = ['metadata' => $metadata, 'writes' => $writes, 'stale' => false];
+
+        return $metadata;
     }
 
     /**
@@ -833,26 +857,36 @@ final class WorkerProcess
 
     private function authorize(int $action, ?string $first = null, ?string $second = null, ?string $database = null, ?string $source = null): int
     {
-        if (!$this->capturingMetadata || $source !== null) {
+        ++$this->authorizations;
+        if (!$this->capturingMetadata) {
             return \SQLite3::OK;
         }
 
-        $metadata = $this->capturedMetadata ?? self::emptyMetadata();
-        if ($action === \SQLite3::INSERT && $first !== null && $database !== null) {
-            $target = ['database' => $database, 'table' => $first];
-            if ($metadata['insert'] !== null && $metadata['insert'] !== $target) {
-                $metadata['ambiguous_insert'] = true;
-            } else {
-                $metadata['insert'] = $target;
+        if ($this->capturedMetadata === null) {
+            // SQLite authorizes an INSERT target before anything naming a table, even in statements virtual tables prepare
+            if ($action === \SQLite3::SELECT || $action === \SQLite3::FUNCTION) {
+                return \SQLite3::OK;
             }
-        } elseif ($action === \SQLite3::UPDATE) {
-            $metadata['update'] = true;
-        } elseif ($action === \SQLite3::DELETE) {
-            $metadata['delete'] = true;
-        } elseif ($action === \SQLite3::ATTACH || $action === \SQLite3::DETACH) {
-            $metadata['attach'] = true;
+            $this->capturedMetadata = self::emptyMetadata();
+            if ($action === \SQLite3::INSERT && $source === null && $first !== null && $database !== null) {
+                $this->capturedMetadata['insert'] = ['database' => $database, 'table' => $first];
+            }
         }
-        $this->capturedMetadata = $metadata;
+
+        if ($source !== null) {
+            return \SQLite3::OK;
+        }
+
+        if ($action === \SQLite3::UPDATE) {
+            $this->capturedMetadata['update'] = true;
+            if ($this->capturedMetadata['insert'] === ['database' => $database, 'table' => $first]) {
+                $this->capturedMetadata['upsert'] = true;
+            }
+        } elseif ($action === \SQLite3::DELETE) {
+            $this->capturedMetadata['delete'] = true;
+        } elseif ($action === \SQLite3::ATTACH || $action === \SQLite3::DETACH) {
+            $this->capturedMetadata['attach'] = true;
+        }
 
         return \SQLite3::OK;
     }
@@ -862,7 +896,7 @@ final class WorkerProcess
      */
     private static function emptyMetadata(): array
     {
-        return ['insert' => null, 'ambiguous_insert' => false, 'update' => false, 'delete' => false, 'attach' => false];
+        return ['insert' => null, 'upsert' => false, 'update' => false, 'delete' => false, 'attach' => false];
     }
 
     private function producesRows(string $sql): bool
@@ -936,23 +970,18 @@ final class WorkerProcess
     private function detectLastInsertId(\SQLite3Stmt $statement, int $before): ?int
     {
         $info = $this->statementInfo[$statement] ?? null;
-        $metadata = $info['metadata'] ?? null;
-        $target = $metadata['insert'] ?? null;
-        if ($info === null
-            || $metadata === null
-            || $target === null
-            || $metadata['ambiguous_insert']
-            || $this->database->changes() === 0
-        ) {
+        if ($info === null || $info['metadata']['insert'] === null || $this->database->changes() === 0) {
             return null;
         }
 
-        if (!$this->isCachedOrdinaryRowIdTable($target)) {
+        $metadata = $info['stale'] ? $this->refreshMetadata($statement, $info['writes']) : $info['metadata'];
+        $target = $metadata['insert'] ?? null;
+        if ($metadata === null || $target === null || !$this->isCachedOrdinaryRowIdTable($target)) {
             return null;
         }
 
         $after = $this->database->lastInsertRowID();
-        if ($metadata['update'] && $after === $before) {
+        if ($metadata['upsert'] && $after === $before) {
             // An UPSERT may have updated an existing row without inserting one. If
             // SQLite's connection-global value did not change, the branch is ambiguous.
             return null;

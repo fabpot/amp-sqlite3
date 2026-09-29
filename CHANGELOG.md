@@ -16,6 +16,7 @@
 - Fail reads of results and BLOB streams interrupted by a connection close instead of silently ending them
 - Keep the rows of fully fetched results readable after their connection closes
 - Speed up repeated executions of prepared write statements by reusing their metadata until SQLite recompiles them
+- Fix missing last insert IDs when triggers write to FTS5 or R*Tree virtual tables
 - Fix INSERT statements failing on SQLite versions older than 3.33, which lack the sqlite_schema table
 - Read result rows in constant time so larger batch sizes no longer slow down iteration
 - Speed up direct INSERT queries by caching whether each target table has rowids until its schema changes

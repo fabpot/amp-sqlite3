@@ -17,6 +17,7 @@ use Fabpot\Amp\Sqlite\Internal\ProtocolError;
 use Fabpot\Amp\Sqlite\Internal\WorkerProcess;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteConfig;
+use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteException;
@@ -537,6 +538,7 @@ final class SqliteQueryTest extends TestCase
         self::assertSame(1, $this->connection->query('INSERT INTO other (id) VALUES (1)')->getLastInsertId());
         self::assertNull($this->connection->query("INSERT OR IGNORE INTO entries (id, value) VALUES (1, 'ignored')")->getLastInsertId());
         self::assertSame(3, $this->connection->query("INSERT INTO entries (value) VALUES ('second'), ('third')")->getLastInsertId());
+        self::assertSame(5, $this->connection->query("INSERT INTO entries (value) VALUES (lower('Fourth')), (upper('fifth'))")->getLastInsertId());
         self::assertNull($this->connection->query("DELETE FROM entries WHERE value = 'second'")->getLastInsertId());
     }
 
@@ -744,6 +746,65 @@ final class SqliteQueryTest extends TestCase
         self::assertNull($this->connection->query("INSERT INTO documents VALUES ('text')")->getLastInsertId());
     }
 
+    #[DataProvider('provideVirtualTableTriggers')]
+    public function testLastInsertIdIgnoresStatementsPreparedByVirtualTables(string $module, string $schema, string $insert): void
+    {
+        $this->withFreshDatabase($module, $schema, static function (SqliteConnection $connection) use ($insert): void {
+            $statement = $connection->prepare($insert);
+
+            self::assertSame(2, $statement->execute(['second'])->getLastInsertId());
+            self::assertSame(3, $statement->execute(['third'])->getLastInsertId());
+            self::assertSame(4, $connection->execute($insert, ['fourth'])->getLastInsertId());
+        });
+    }
+
+    public static function provideVirtualTableTriggers(): iterable
+    {
+        yield 'FTS5' => ['FTS5', <<<'SQL'
+            CREATE TABLE posts (id INTEGER PRIMARY KEY, body TEXT);
+            CREATE VIRTUAL TABLE posts_fts USING fts5(body, content = 'posts', content_rowid = 'id');
+            CREATE TRIGGER posts_insert AFTER INSERT ON posts BEGIN
+                INSERT INTO posts_fts (rowid, body) VALUES (NEW.id, NEW.body);
+            END;
+            INSERT INTO posts (body) VALUES ('first');
+            SQL, 'INSERT INTO posts (body) VALUES (?)'];
+        yield 'R*Tree' => ['RTREE', <<<'SQL'
+            CREATE TABLE shapes (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE VIRTUAL TABLE shapes_index USING rtree(id, min_x, max_x);
+            CREATE TRIGGER shapes_insert AFTER INSERT ON shapes BEGIN
+                INSERT INTO shapes_index VALUES (NEW.id, NEW.id, NEW.id);
+            END;
+            INSERT INTO shapes (name) VALUES ('first');
+            SQL, 'INSERT INTO shapes (name) VALUES (?)'];
+    }
+
+    public function testLastInsertIdOfInsertSelectingFromFullTextIndex(): void
+    {
+        $schema = <<<'SQL'
+            CREATE TABLE posts (id INTEGER PRIMARY KEY, body TEXT);
+            CREATE VIRTUAL TABLE posts_fts USING fts5(body, content = 'posts', content_rowid = 'id');
+            INSERT INTO posts (body) VALUES ('first');
+            INSERT INTO posts_fts (rowid, body) VALUES (1, 'first');
+            SQL;
+
+        $this->withFreshDatabase('FTS5', $schema, static function (SqliteConnection $connection): void {
+            self::assertSame(2, $connection->query("INSERT INTO posts (body) SELECT body FROM posts_fts WHERE posts_fts MATCH 'first'")->getLastInsertId());
+        });
+    }
+
+    public function testUpdatingVirtualTableHasNoLastInsertId(): void
+    {
+        $schema = <<<'SQL'
+            CREATE VIRTUAL TABLE shapes_index USING rtree(id, min_x, max_x);
+            INSERT INTO shapes_index VALUES (1, 1, 1);
+            SQL;
+
+        $this->withFreshDatabase('RTREE', $schema, static function (SqliteConnection $connection): void {
+            self::assertNull($connection->query('UPDATE shapes_index SET max_x = 5 WHERE id = 1')->getLastInsertId());
+            self::assertNull($connection->query('INSERT INTO shapes_index VALUES (2, 2, 2)')->getLastInsertId());
+        });
+    }
+
     public function testLastInsertIdSupportsTemporaryAndAttachedTables(): void
     {
         $this->connection->executeScript(<<<'SQL'
@@ -934,6 +995,31 @@ final class SqliteQueryTest extends TestCase
         } catch (SqliteQueryError $error) {
             self::assertNull($error->getResultCode());
             self::assertNull($error->getExtendedResultCode());
+        }
+    }
+
+    /**
+     * @param \Closure(SqliteConnection):void $test
+     */
+    private function withFreshDatabase(string $module, string $schema, \Closure $test): void
+    {
+        if ($this->connection->query("SELECT sqlite_compileoption_used('ENABLE_{$module}') AS enabled")->fetchRow() !== ['enabled' => 1]) {
+            self::markTestSkipped("SQLite was built without {$module}");
+        }
+
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $database = new \SQLite3($path);
+        $database->exec($schema);
+        $database->close();
+        $connection = (new SqliteConnector())->connect(new SqliteConfig($path));
+
+        try {
+            $test($connection);
+        } finally {
+            $connection->close();
+            @\unlink($path);
+            @\unlink($path . '-shm');
+            @\unlink($path . '-wal');
         }
     }
 
