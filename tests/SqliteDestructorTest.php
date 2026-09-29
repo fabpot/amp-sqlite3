@@ -18,6 +18,7 @@ use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnection;
 use Fabpot\Amp\Sqlite\SqliteConnectionPool;
 use Fabpot\Amp\Sqlite\SqliteConnector;
+use Fabpot\Amp\Sqlite\SqliteTransaction;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -190,6 +191,51 @@ final class SqliteDestructorTest extends TestCase
         self::assertSame(
             [['value' => 'kept']],
             \iterator_to_array($this->connection->query("SELECT value FROM entries WHERE value IN ('dropped', 'kept')")),
+        );
+    }
+
+    /**
+     * @param \Closure(SqliteTransaction):object $open
+     */
+    #[DataProvider('provideTransactionResources')]
+    public function testTransactionCanFinishRightAfterDroppingAnUnreadResource(\Closure $open): void
+    {
+        $transaction = $this->connection->beginTransaction();
+        $transaction->execute("INSERT INTO entries VALUES ('kept')");
+        $open($transaction);
+
+        $transaction->commit();
+
+        self::assertSame(['count' => 1], $this->connection->query("SELECT COUNT(*) AS count FROM entries WHERE value = 'kept'")->fetchRow());
+    }
+
+    public static function provideTransactionResources(): iterable
+    {
+        yield 'result' => [static fn (SqliteTransaction $transaction): object => $transaction->query('SELECT value FROM entries')];
+        yield 'BLOB stream' => [static fn (SqliteTransaction $transaction): object => $transaction->openBlob('entries', 'value', 3)];
+    }
+
+    public function testPooledTransactionCanFinishRightAfterDroppingAnUnreadResult(): void
+    {
+        $transaction = $this->pool->beginTransaction();
+        $transaction->query('SELECT value FROM entries');
+
+        $transaction->commit();
+
+        self::assertSame(['answer' => 42], $this->pool->query('SELECT 42 AS answer')->fetchRow());
+    }
+
+    public function testCollectingAStatementTogetherWithItsActiveResult(): void
+    {
+        $statement = $this->connection->prepare('SELECT value FROM entries');
+        $result = $statement->execute();
+        unset($statement, $result);
+
+        \gc_collect_cycles();
+
+        self::assertSame(
+            ['answer' => 42],
+            async(fn () => $this->connection->query('SELECT 42 AS answer')->fetchRow())->await(new TimeoutCancellation(5)),
         );
     }
 }

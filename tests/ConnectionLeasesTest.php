@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Test;
 
+use Amp\Closable;
 use Fabpot\Amp\Sqlite\Internal\ConnectionLeases;
 use Fabpot\Amp\Sqlite\SqliteTransactionError;
 use PHPUnit\Framework\TestCase;
@@ -53,17 +54,27 @@ final class ConnectionLeasesTest extends TestCase
         (new ConnectionLeases())->acquireTransactionLease();
     }
 
-    public function testRetainedTransactionLeaseBelongsToTheTaskThatRetainedIt(): void
+    public function testTransactionResourceBelongsToTheTaskThatOpenedItUntilClosed(): void
     {
         $leases = new ConnectionLeases();
-        $leases->holdTransactionLock($leases->acquireConnection());
-        $leases->acquireTransactionLease();
-        $resource = $leases->retain(null, true);
+        $resource = self::createResource();
+        $leases->trackTransactionResource($resource);
 
         self::assertTrue($leases->currentTaskHoldsTransactionLease());
         self::assertFalse(async($leases->currentTaskHoldsTransactionLease(...))->await());
 
-        $resource->release();
+        $resource->close();
+
+        self::assertFalse($leases->currentTaskHoldsTransactionLease());
+    }
+
+    public function testDroppedTransactionResourceNoLongerBelongsToItsTask(): void
+    {
+        $leases = new ConnectionLeases();
+        $resource = self::createResource();
+        $leases->trackTransactionResource($resource);
+
+        unset($resource);
 
         self::assertFalse($leases->currentTaskHoldsTransactionLease());
     }
@@ -100,5 +111,26 @@ final class ConnectionLeasesTest extends TestCase
         self::assertFalse($leases->isBusy());
         $this->expectException(SqliteTransactionError::class);
         $waiter->await();
+    }
+
+    private static function createResource(): Closable
+    {
+        return new class implements Closable {
+            private bool $closed = false;
+
+            public function close(): void
+            {
+                $this->closed = true;
+            }
+
+            public function isClosed(): bool
+            {
+                return $this->closed;
+            }
+
+            public function onClose(\Closure $onClose): void
+            {
+            }
+        };
     }
 }

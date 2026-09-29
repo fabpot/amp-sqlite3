@@ -374,6 +374,9 @@ final class Connection implements SqliteConnection
             },
         );
         $this->blobs[$blob] = true;
+        if ($transactional) {
+            $this->leases->trackTransactionResource($blob);
+        }
 
         return $blob;
     }
@@ -459,6 +462,9 @@ final class Connection implements SqliteConnection
             $lease,
         );
         $this->results[$result] = true;
+        if ($transactional && $lease !== null) {
+            $this->leases->trackTransactionResource($result);
+        }
 
         return $result;
     }

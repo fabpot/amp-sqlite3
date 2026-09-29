@@ -33,7 +33,8 @@ final class Statement implements SqliteStatement
     private readonly DeferredFuture $onClose;
     private bool $closed = false;
     private int $lastUsedAt;
-    private ?SqliteResult $activeResult = null;
+    /** @var \WeakReference<SqliteResult>|null */
+    private ?\WeakReference $activeResult = null;
     /** @var \WeakReference<Transaction>|null */
     private ?\WeakReference $transaction;
 
@@ -74,7 +75,7 @@ final class Statement implements SqliteStatement
         $transactionLock = $transaction?->acquireOperation();
 
         try {
-            $this->activeResult?->close();
+            $this->activeResult?->get()?->close();
             $result = $this->connection->executeStatement($this->statementId, $this->query, $params, $transaction !== null, $this);
             if ($this->isClosed()) {
                 $result->close();
@@ -83,12 +84,7 @@ final class Statement implements SqliteStatement
             }
 
             $this->lastUsedAt = \time();
-            if (!$result->isClosed()) {
-                $this->activeResult = $result;
-                $result->onClose(function (): void {
-                    $this->activeResult = null;
-                });
-            }
+            $this->activeResult = $result->isClosed() ? null : \WeakReference::create($result);
 
             return $result;
         } finally {
@@ -128,12 +124,13 @@ final class Statement implements SqliteStatement
     }
 
     /**
+     * @param \WeakReference<SqliteResult>|null $activeResult
      * @param DeferredFuture<null> $onClose
      */
-    private static function dispose(Connection $connection, int $statementId, string $query, ?SqliteResult $activeResult, DeferredFuture $onClose): void
+    private static function dispose(Connection $connection, int $statementId, string $query, ?\WeakReference $activeResult, DeferredFuture $onClose): void
     {
         try {
-            $activeResult?->close();
+            $activeResult?->get()?->close();
         } finally {
             try {
                 $connection->closeStatement($statementId, $query);

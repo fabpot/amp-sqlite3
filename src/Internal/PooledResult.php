@@ -17,7 +17,6 @@ use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
 use Fabpot\Amp\Sqlite\SqliteBlob;
 use Fabpot\Amp\Sqlite\SqliteResult;
-use Revolt\EventLoop;
 
 /**
  * Releases its pooled resource as soon as the wrapped result is closed, since SQLite never returns a next result.
@@ -48,7 +47,9 @@ final class PooledResult implements SqliteResult, \IteratorAggregate
     public function __destruct()
     {
         if ($this->release !== null) {
-            EventLoop::queue(self::dispose(...), $this->result, $this->release);
+            // Dropping this wrapper drops the wrapped result, whose destructor closes it
+            $this->result->onClose($this->release);
+            $this->release = null;
         }
     }
 
@@ -101,9 +102,11 @@ final class PooledResult implements SqliteResult, \IteratorAggregate
 
     public function close(): void
     {
-        $release = $this->release;
-        $this->release = null;
-        self::dispose($this->result, $release);
+        try {
+            $this->result->close();
+        } finally {
+            $this->release();
+        }
     }
 
     public function isClosed(): bool
@@ -114,20 +117,6 @@ final class PooledResult implements SqliteResult, \IteratorAggregate
     public function onClose(\Closure $onClose): void
     {
         $this->result->onClose($onClose);
-    }
-
-    /**
-     * @param null|\Closure():void $release
-     */
-    private static function dispose(SqliteResult $result, ?\Closure $release): void
-    {
-        try {
-            $result->close();
-        } finally {
-            if ($release !== null) {
-                $release();
-            }
-        }
     }
 
     private function releaseIfClosed(): void

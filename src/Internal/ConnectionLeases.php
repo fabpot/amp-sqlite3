@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace Fabpot\Amp\Sqlite\Internal;
 
+use Amp\Closable;
 use Amp\DeferredFuture;
 use Amp\ForbidCloning;
 use Amp\ForbidSerialization;
@@ -39,17 +40,17 @@ final class ConnectionLeases
     private int $transactionLeases = 0;
     /** @var DeferredFuture<null>|null */
     private ?DeferredFuture $transactionIdle = null;
-    /** @var \WeakMap<\stdClass, int> */
-    private \WeakMap $transactionLeaseOwners;
+    /** @var \WeakMap<\stdClass, \WeakMap<Closable, true>> */
+    private \WeakMap $transactionResources;
     /** @var FiberLocal<\stdClass> */
     private readonly FiberLocal $task;
 
     public function __construct()
     {
         $this->mutex = new LocalMutex();
-        /** @var \WeakMap<\stdClass, int> $transactionLeaseOwners */
-        $transactionLeaseOwners = new \WeakMap();
-        $this->transactionLeaseOwners = $transactionLeaseOwners;
+        /** @var \WeakMap<\stdClass, \WeakMap<Closable, true>> $transactionResources */
+        $transactionResources = new \WeakMap();
+        $this->transactionResources = $transactionResources;
         $this->task = new FiberLocal(static fn (): \stdClass => new \stdClass());
     }
 
@@ -93,21 +94,28 @@ final class ConnectionLeases
     public function retain(?Lock $lock, bool $transactional): Lock
     {
         ++$this->retainedLeases;
-        $owner = null;
-        if ($transactional) {
-            $owner = $this->task->get();
-            $this->transactionLeaseOwners[$owner] = ($this->transactionLeaseOwners[$owner] ?? 0) + 1;
-        }
 
-        return new Lock(function () use ($lock, $transactional, $owner): void {
+        return new Lock(function () use ($lock, $transactional): void {
             if ($this->retainedLeases > 0) {
                 --$this->retainedLeases;
             }
             $lock?->release();
             if ($transactional) {
-                $this->releaseTransactionLease($owner);
+                $this->releaseTransactionLease();
             }
         });
+    }
+
+    /**
+     * Records a transaction resource opened by the current task, which must close it before finishing the transaction.
+     */
+    public function trackTransactionResource(Closable $resource): void
+    {
+        $task = $this->task->get();
+        /** @var \WeakMap<Closable, true> $resources */
+        $resources = $this->transactionResources[$task] ?? new \WeakMap();
+        $resources[$resource] = true;
+        $this->transactionResources[$task] = $resources;
     }
 
     public function holdTransactionLock(Lock $lock): void
@@ -134,7 +142,13 @@ final class ConnectionLeases
      */
     public function currentTaskHoldsTransactionLease(): bool
     {
-        return isset($this->transactionLeaseOwners[$this->task->get()]);
+        foreach ($this->transactionResources[$this->task->get()] ?? [] as $resource => $_) {
+            if (!$resource->isClosed()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function isBusy(): bool
@@ -149,20 +163,16 @@ final class ConnectionLeases
     {
         $this->releaseTransactionLock();
         $this->transactionLeases = 0;
-        /** @var \WeakMap<\stdClass, int> $transactionLeaseOwners */
-        $transactionLeaseOwners = new \WeakMap();
-        $this->transactionLeaseOwners = $transactionLeaseOwners;
+        /** @var \WeakMap<\stdClass, \WeakMap<Closable, true>> $transactionResources */
+        $transactionResources = new \WeakMap();
+        $this->transactionResources = $transactionResources;
         $this->transactionIdle?->complete();
         $this->transactionIdle = null;
         $this->retainedLeases = 0;
     }
 
-    private function releaseTransactionLease(?\stdClass $owner = null): void
+    private function releaseTransactionLease(): void
     {
-        if ($owner !== null && isset($this->transactionLeaseOwners[$owner]) && --$this->transactionLeaseOwners[$owner] === 0) {
-            unset($this->transactionLeaseOwners[$owner]);
-        }
-
         if ($this->transactionLeases === 0) {
             return;
         }
