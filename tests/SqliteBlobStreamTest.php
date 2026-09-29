@@ -23,6 +23,7 @@ use Fabpot\Amp\Sqlite\SqliteConfig;
 use Fabpot\Amp\Sqlite\SqliteConnectionException;
 use Fabpot\Amp\Sqlite\SqliteConnector;
 use Fabpot\Amp\Sqlite\SqliteException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use function Amp\async;
 use function Amp\ByteStream\buffer;
@@ -162,6 +163,37 @@ final class SqliteBlobStreamTest extends TestCase
         $this->expectException(SqliteException::class);
 
         $this->connection->openBlob('files', 'contents', 999);
+    }
+
+    #[DataProvider('provideNamesWithNulBytes')]
+    public function testRejectsNamesWithNulBytes(string $table, string $column, string $database): void
+    {
+        $this->connection->query('INSERT INTO files VALUES (zeroblob(1))');
+
+        try {
+            $this->connection->openBlob($table, $column, 1, $database);
+            self::fail('Expected the NUL byte to be rejected');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('SQLite BLOB table, column, and database names must not contain NUL bytes', $exception->getMessage());
+        }
+
+        $transaction = $this->connection->beginTransaction();
+        try {
+            $transaction->openBlob($table, $column, 1, $database);
+            self::fail('Expected the NUL byte to be rejected');
+        } catch (\InvalidArgumentException) {
+        } finally {
+            $transaction->rollback();
+        }
+
+        self::assertSame(1, $this->connection->openBlob('files', 'contents', 1)->getLength());
+    }
+
+    public static function provideNamesWithNulBytes(): iterable
+    {
+        yield 'table' => ["files\0ignored", 'contents', 'main'];
+        yield 'column' => ['files', "contents\0ignored", 'main'];
+        yield 'database' => ['files', 'contents', "main\0ignored"];
     }
 
     public function testRejectsWritingPastBlobLength(): void

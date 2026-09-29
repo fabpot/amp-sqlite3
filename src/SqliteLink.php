@@ -22,6 +22,9 @@ interface SqliteLink extends SqliteExecutor, SqlLink
 {
     public function beginTransaction(): SqliteTransaction;
 
+    /**
+     * @throws \InvalidArgumentException If the table, column, or database name contains a NUL byte.
+     */
     public function openBlob(
         string $table,
         string $column,

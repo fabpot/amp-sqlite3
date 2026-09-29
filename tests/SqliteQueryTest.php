@@ -272,6 +272,23 @@ final class SqliteQueryTest extends TestCase
         }
     }
 
+    public function testWorkerRejectsBlobNamesWithNulBytes(): void
+    {
+        $worker = $this->createWorker(batchSize: 1);
+
+        try {
+            $worker->handle(['operation' => 'execute', 'sql' => 'CREATE TABLE files (contents BLOB)', 'params' => [], 'bind_parameters' => false]);
+            $worker->handle(['operation' => 'execute', 'sql' => 'INSERT INTO files VALUES (zeroblob(1))', 'params' => [], 'bind_parameters' => false]);
+
+            $this->expectException(ProtocolError::class);
+            $this->expectExceptionMessage("Protocol field 'table' must not contain NUL bytes");
+
+            $worker->handle(['operation' => 'openBlob', 'table' => "files\0ignored", 'column' => 'contents', 'row_id' => 1, 'database' => 'main', 'mode' => 'ReadOnly']);
+        } finally {
+            $worker->shutdown();
+        }
+    }
+
     public function testInitialFetchErrorDoesNotLeaveAStaleResult(): void
     {
         $worker = $this->createWorker(batchSize: 3);

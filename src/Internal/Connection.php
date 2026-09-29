@@ -346,6 +346,9 @@ final class Connection implements SqliteConnection
         SqliteBlobMode $mode,
         bool $transactional,
     ): SqliteBlobStream {
+        if (\str_contains($table . $column . $database, "\0")) {
+            throw new \InvalidArgumentException('SQLite BLOB table, column, and database names must not contain NUL bytes');
+        }
         $this->assertOpen();
         $lock = $this->acquire($transactional);
 

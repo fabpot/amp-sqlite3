@@ -243,6 +243,19 @@ final class WorkerProcess
     /**
      * @param array<string, mixed> $request
      */
+    private static function requireName(array $request, string $key): string
+    {
+        $name = self::requireString($request, $key);
+        if (\str_contains($name, "\0")) {
+            throw new ProtocolError("Protocol field '{$key}' must not contain NUL bytes");
+        }
+
+        return $name;
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     */
     private static function requireSql(array $request): string
     {
         $sql = self::requireString($request, 'sql');
@@ -407,10 +420,10 @@ final class WorkerProcess
         }
         $flags = $mode === SqliteBlobMode::ReadWrite->name ? SQLITE3_OPEN_READWRITE : SQLITE3_OPEN_READONLY;
         $blob = $this->database->openBlob(
-            self::requireString($request, 'table'),
-            self::requireString($request, 'column'),
+            self::requireName($request, 'table'),
+            self::requireName($request, 'column'),
             self::requireInt($request, 'row_id'),
-            self::requireString($request, 'database'),
+            self::requireName($request, 'database'),
             $flags,
         );
         if ($blob === false) {

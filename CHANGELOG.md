@@ -10,6 +10,7 @@
 - Ignore empty SQL statements so they no longer break scripts or hide transaction control from executeScript()
 - Skip comments and whitespace exactly like SQLite so they no longer hide statements or transaction control
 - Reject SQL containing NUL bytes instead of letting SQLite silently ignore the rest of the text
+- Reject BLOB table, column, and database names containing NUL bytes instead of truncating them
 - Make beginTransaction() wait for the active transaction to finish instead of throwing, like other connection operations
 - Throw instead of deadlocking when a fiber finishes a transaction while holding its unread results or BLOB streams
 - Keep pragma values out of child-process stack traces when a connection fails to start
