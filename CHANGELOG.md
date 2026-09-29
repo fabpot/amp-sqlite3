@@ -2,7 +2,7 @@
 
 ## 1.1.0
 
-- Count only rows changed directly by INSERT, UPDATE, and DELETE statements, excluding trigger and virtual table changes
+- Count only rows changed directly by INSERT, UPDATE, and DELETE statements, so trigger writes, virtual table internals, and CREATE TABLE AS SELECT no longer count
 - Fix pooled results losing their last row and holding their connection when read with fetchRow()
 - Roll back abandoned nested transactions instead of blocking their parent transaction
 - Roll back abandoned transactions even while their prepared statements are still referenced
@@ -12,7 +12,7 @@
 - Reject SQL containing NUL bytes instead of letting SQLite silently ignore the rest of the text
 - Reject BLOB table, column, and database names containing NUL bytes instead of truncating them
 - Make beginTransaction() wait for the active transaction to finish instead of throwing, like other connection operations
-- Throw instead of deadlocking when a fiber finishes a transaction while holding its unread results or BLOB streams
+- Throw instead of deadlocking when a fiber finishes or begins a transaction while holding unread transaction results or BLOB streams
 - Keep pragma values out of child-process stack traces when a connection fails to start
 - Fail reads of results and BLOB streams interrupted by a connection close instead of silently ending them
 - Keep the rows of fully fetched results readable after their connection closes
