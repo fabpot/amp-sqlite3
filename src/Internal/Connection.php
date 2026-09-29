@@ -164,6 +164,10 @@ final class Connection implements SqliteConnection
 
         $this->closed = true;
 
+        if ($this->leases->isBusy() && !$this->channel->isBusy()) {
+            self::awaitQueuedCleanup();
+        }
+
         if ($this->channel->isBusy() || $this->leases->isBusy()) {
             $this->forceClose();
 
@@ -639,6 +643,17 @@ final class Connection implements SqliteConnection
             } catch (\Throwable) {
             }
         }
+    }
+
+    /**
+     * Lets the cleanup queued by destructors of dropped resources release their leases, which needs no request once the
+     * connection is closed.
+     */
+    private static function awaitQueuedCleanup(): void
+    {
+        $queued = new DeferredFuture();
+        EventLoop::queue($queued->complete(...));
+        $queued->getFuture()->await();
     }
 
     /**

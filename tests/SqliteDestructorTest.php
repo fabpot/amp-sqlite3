@@ -259,6 +259,39 @@ final class SqliteDestructorTest extends TestCase
         yield 'pooled transaction' => [static fn (SqliteConnection $connection, SqliteConnectionPool $pool): SqliteLink => $pool->beginTransaction()];
     }
 
+    /**
+     * @param \Closure(SqliteConnection):mixed $open
+     */
+    #[DataProvider('provideDroppedConnectionResources')]
+    public function testClosingRightAfterDroppingAResourceClosesTheConnectionInOrder(\Closure $open): void
+    {
+        $open($this->connection);
+
+        $this->connection->close();
+
+        self::assertFileDoesNotExist($this->path . '-wal');
+        self::assertSame(['count' => 0], (new SqliteConnector())->connect(new SqliteConfig($this->path))->query("SELECT COUNT(*) AS count FROM entries WHERE value = 'dropped'")->fetchRow());
+    }
+
+    public static function provideDroppedConnectionResources(): iterable
+    {
+        yield 'unread result' => [static fn (SqliteConnection $connection): mixed => $connection->query('SELECT value FROM entries')];
+        yield 'statement with an unread result' => [static fn (SqliteConnection $connection): mixed => $connection->prepare('SELECT value FROM entries')->execute()];
+        yield 'BLOB stream' => [static fn (SqliteConnection $connection): mixed => $connection->openBlob('entries', 'value', 3)];
+        yield 'transaction' => [static function (SqliteConnection $connection): void {
+            $connection->beginTransaction()->execute("INSERT INTO entries VALUES ('dropped')");
+        }];
+        yield 'transaction with an unread result' => [static function (SqliteConnection $connection): void {
+            $transaction = $connection->beginTransaction();
+            $transaction->execute("INSERT INTO entries VALUES ('dropped')");
+            $transaction->query('SELECT value FROM entries');
+        }];
+        yield 'nested transaction' => [static function (SqliteConnection $connection): void {
+            $transaction = $connection->beginTransaction();
+            $transaction->beginTransaction()->execute("INSERT INTO entries VALUES ('dropped')");
+        }];
+    }
+
     public function testCollectingATransactionTogetherWithItsNestedTransaction(): void
     {
         $cycle = new \stdClass();
