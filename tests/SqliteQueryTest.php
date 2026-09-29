@@ -868,6 +868,56 @@ final class SqliteQueryTest extends TestCase
         }
     }
 
+    #[DataProvider('provideSchemaRollbacks')]
+    public function testLastInsertIdFollowsTableRecreatedAfterSchemaRollback(string $begin, string $create, \Closure $rollback): void
+    {
+        $this->connection->query('CREATE TABLE placeholder (value TEXT)');
+        $this->createRolledBackRowIdTable($this->connection, $begin, $create, $rollback);
+
+        $this->connection->query('DROP TABLE placeholder');
+        $this->connection->query('CREATE TABLE entries (value TEXT PRIMARY KEY) WITHOUT ROWID');
+
+        self::assertNull($this->connection->query("INSERT INTO entries VALUES ('without rowid')")->getLastInsertId());
+    }
+
+    public static function provideSchemaRollbacks(): iterable
+    {
+        yield 'rollback' => ['BEGIN', 'CREATE TABLE entries (value TEXT)', static fn (SqliteConnection $connection) => $connection->query('ROLLBACK')];
+        yield 'rollback to savepoint' => ['SAVEPOINT before', 'CREATE TABLE entries (value TEXT)', static function (SqliteConnection $connection): void {
+            $connection->query('ROLLBACK TO before');
+            $connection->query('RELEASE before');
+        }];
+        yield 'conflict rollback' => ['BEGIN', 'CREATE TABLE entries (value TEXT UNIQUE ON CONFLICT ROLLBACK)', static function (SqliteConnection $connection): void {
+            try {
+                $connection->query("INSERT INTO entries VALUES ('rowid')");
+                self::fail('Expected the conflict to roll back the transaction');
+            } catch (SqliteQueryError) {
+            }
+        }];
+    }
+
+    public function testLastInsertIdFollowsTableRecreatedByAnotherConnectionAfterSchemaRollback(): void
+    {
+        $path = \sys_get_temp_dir() . '/amp-sqlite-' . \bin2hex(\random_bytes(8)) . '.sqlite';
+        $connection = (new SqliteConnector())->connect(new SqliteConfig($path));
+        $other = (new SqliteConnector())->connect(new SqliteConfig($path));
+
+        try {
+            $connection->query('CREATE TABLE placeholder (value TEXT)');
+            $this->createRolledBackRowIdTable($connection, 'BEGIN', 'CREATE TABLE entries (value TEXT)', static fn (SqliteConnection $connection) => $connection->query('ROLLBACK'));
+
+            $other->executeScript('DROP TABLE placeholder; CREATE TABLE entries (value TEXT PRIMARY KEY) WITHOUT ROWID;');
+
+            self::assertNull($connection->query("INSERT INTO entries VALUES ('without rowid')")->getLastInsertId());
+        } finally {
+            $connection->close();
+            $other->close();
+            @\unlink($path);
+            @\unlink($path . '-shm');
+            @\unlink($path . '-wal');
+        }
+    }
+
     #[DataProvider('provideReattachments')]
     public function testLastInsertIdFollowsReattachedDatabase(string $reattachment): void
     {
@@ -1036,6 +1086,23 @@ final class SqliteQueryTest extends TestCase
             @\unlink($path . '-shm');
             @\unlink($path . '-wal');
         }
+    }
+
+    /**
+     * Caches a rowid table at a schema version that the rollback then hands out again.
+     *
+     * @param \Closure(SqliteConnection):mixed $rollback
+     */
+    private function createRolledBackRowIdTable(SqliteConnection $connection, string $begin, string $create, \Closure $rollback): void
+    {
+        $connection->query($begin);
+        $connection->query('DROP TABLE placeholder');
+        $connection->query($create);
+        self::assertSame(1, $connection->query("INSERT INTO entries VALUES ('rowid')")->getLastInsertId());
+
+        $rollback($connection);
+
+        self::assertNull($connection->query("SELECT name FROM sqlite_master WHERE name = 'entries'")->fetchRow());
     }
 
     private function createWorker(int $batchSize): WorkerProcess

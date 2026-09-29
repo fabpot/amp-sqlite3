@@ -998,8 +998,13 @@ final class WorkerProcess
     private function isCachedOrdinaryRowIdTable(array $target): bool
     {
         $key = $target['database'] . "\0" . $target['table'];
+        $authorizations = $this->authorizations;
         /** @var int $schemaVersion */
         $schemaVersion = $this->queryInternal('PRAGMA "' . \str_replace('"', '""', $target['database']) . '".schema_version');
+        // Rolling back schema changes restores the schema version, but also expires every statement, including this one
+        if ($this->authorizations !== $authorizations) {
+            $this->ordinaryRowIdTables = [];
+        }
         $cached = $this->ordinaryRowIdTables[$key] ?? null;
         if ($cached !== null && $cached['schema_version'] === $schemaVersion) {
             return $cached['ordinary'];
